@@ -923,11 +923,9 @@
     $('#btn-run').classList.toggle('on', !on); $('#btn-run').setAttribute('aria-pressed', !on);
     $('#btn-edit').classList.toggle('on', on); $('#btn-edit').setAttribute('aria-pressed', on);
     const note = $('#edit-note');
-    note.hidden = !on;
-    if (on) {
-      const left = Math.max(0, Math.round(((editState.editUntil || 0) - Date.now()) / 1000));
-      note.textContent = left < 60 ? `Edit mode ends in ${left} s without activity. Touch the panel to keep it.` : 'Edit mode: changes apply to the output right away.';
-    }
+    const left = Math.max(0, Math.round(((editState.editUntil || 0) - Date.now()) / 1000));
+    note.hidden = !(on && left < 60);                  // só avisa no último minuto
+    if (!note.hidden) note.textContent = `Edit mode ends in ${left} s without activity. Touch the panel to keep it.`;
     renderMonitor();
   }
   function renderMonitor() {

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="GVPT.jpg" alt="GVPT" width="600">
+</p>
+
 # GVPT — G's Video Projection Tool
 
 Vibecoded Video Projection Tool by [Guilherme Martins](http://guilhermemartins.net)
