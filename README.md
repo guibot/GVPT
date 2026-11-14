@@ -2,7 +2,7 @@
 
 # GVPT — G's Video Projection Tool
 
-Vibecoded Video Projection Tool by [Guilherme Martins](http://guilhermemartins.net)
+Vibecoded by [Guilherme Martins](http://guilhermemartins.net)
 
 **English** · [Português](#português)
 
