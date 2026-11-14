@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="GVPT.jpg" alt="GVPT" width="600">
-</p>
+<img src="GVPT.jpg" alt="GVPT" width="100%">
 
 # GVPT — G's Video Projection Tool
 
