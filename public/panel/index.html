@@ -25,7 +25,12 @@
     <span class="logo">GVPT</span>
     <span id="version" class="version" title="App version"></span>
     <span id="status" class="status" title="Connection status"><i></i><span>connecting</span></span>
+    <div id="runedit" class="seg" role="group" aria-label="Mode">
+      <button id="btn-run" type="button" class="on" aria-pressed="true" title="Run: only watch the output. The editing controls are hidden">RUN</button>
+      <button id="btn-edit" type="button" aria-pressed="false" title="Edit: change layers and media. Goes back to RUN after 5 minutes without activity">EDIT</button>
+    </div>
     <span class="spacer"></span>
+    <button id="btn-player" class="ghost" title="Stop or resume all the videos (F9). The output stays visible and the server keeps running" hidden>Turn off player</button>
     <button id="btn-debug" class="ghost" aria-pressed="false" title="Show debug information">Debug</button>
     <button id="btn-media" class="ghost">Media <b id="jobs-badge" class="badge" hidden></b></button>
     <button id="btn-settings" class="ghost" aria-label="Settings">Settings</button>
@@ -33,6 +38,7 @@
 
   <main>
     <section id="col-layers" aria-label="Layers">
+      <div id="edit-note" class="edit-note" hidden></div>
       <div class="bar"><h2>Layers</h2><button id="btn-add" class="primary">+ Layer</button></div>
       <ul id="layer-list"></ul>
     </section>
@@ -43,6 +49,7 @@
         <div id="preview"><div id="pstage"></div></div>
       </div>
       <div id="mask-tools" hidden></div>
+      <div id="monitor" aria-live="off"></div>
     </section>
 
     <nav id="tabs">
@@ -69,16 +76,59 @@
   <label class="field check"><input id="set-conv-on" type="checkbox"> Convert videos on upload</label>
   <p class="hint">When off, videos are kept as uploaded (H.264, VP8, VP9 or AV1 in .mp4, .m4v, .mov or .webm), for example already compressed with HandBrake. Other formats are still converted.</p>
   <label class="field">Maximum size
-    <select id="set-conv-size"><option value="640x480">640 × 480</option><option value="800x600">800 × 600</option></select>
+    <select id="set-conv-size">
+      <optgroup label="Landscape">
+        <option value="1920x1080">1920 × 1080</option><option value="1280x720">1280 × 720</option><option value="960x540">960 × 540</option>
+        <option value="640x360">640 × 360</option><option value="480x270">480 × 270</option>
+      </optgroup>
+      <optgroup label="Portrait">
+        <option value="1080x1920">1080 × 1920</option><option value="720x1280">720 × 1280</option><option value="540x960">540 × 960</option>
+        <option value="360x640">360 × 640</option><option value="270x480">270 × 480</option>
+      </optgroup>
+      <option value="custom">Custom…</option>
+    </select>
   </label>
+  <div id="conv-custom" class="g2" hidden>
+    <label class="field">Max width<input id="set-conv-w" type="text" inputmode="numeric" autocomplete="off"></label>
+    <label class="field">Max height<input id="set-conv-h" type="text" inputmode="numeric" autocomplete="off"></label>
+  </div>
+  <p class="hint">The video is scaled down to fit inside this box, keeping its proportions (never enlarged). If a video is portrait and the box is landscape (or the other way round), the box is turned to match.</p>
   <label class="field">Frames per second
     <select id="set-conv-fps"><option value="25">25</option><option value="30">30</option></select>
   </label>
-  <p class="hint">Applies to the next videos you upload.</p>
+  <p class="hint">Applies to the next videos you upload. Pick a smaller size for small videos: it saves a lot of CPU.</p>
   <h3>In progress</h3>
   <ul id="queue" class="plain"></ul>
   <h3>Library</h3>
+  <div id="lib-bar" class="lib-bar" hidden>
+    <label class="field check"><input id="lib-all" type="checkbox"> Select all</label>
+    <div class="lib-actions">
+      <button id="btn-resize-sel" type="button" disabled>Re-convert selected</button>
+      <button id="btn-del-sel" type="button" class="danger" disabled>Delete selected</button>
+    </div>
+  </div>
   <ul id="library" class="plain"></ul>
+</dialog>
+
+<dialog id="resize-dlg">
+  <form method="dialog">
+    <h2>Re-convert video</h2>
+    <p class="hint">Creates a <b>new file</b> next to the original, named <code>name_resized_WIDTHxHEIGHT</code>. The original is not touched. The video keeps its proportions, is never enlarged, and is re-encoded at maximum quality (almost lossless; no audio). The player's videos stop while it works.</p>
+    <ul id="rs-files" class="plain"></ul>
+    <label class="field">Maximum size
+      <select id="rs-size"></select>
+    </label>
+    <div id="rs-custom" class="g2" hidden>
+      <label class="field">Max width<input id="rs-w" type="text" inputmode="numeric" autocomplete="off"></label>
+      <label class="field">Max height<input id="rs-h" type="text" inputmode="numeric" autocomplete="off"></label>
+    </div>
+    <label class="field check" id="rs-use-row" hidden><input id="rs-use" type="checkbox" checked> Use the copy in the layers where the original is used</label>
+    <p id="rs-use-hint" class="hint" hidden>Those layers switch to the new video, keeping the same size on screen.</p>
+    <div class="row-btns end">
+      <button type="button" id="rs-cancel">Cancel</button>
+      <button type="button" id="rs-go" class="primary">Re-convert</button>
+    </div>
+  </form>
 </dialog>
 
 <dialog id="settings">
@@ -91,6 +141,8 @@
       </select>
     </label>
     <p class="hint">When you change it, layers keep the same position in proportion.</p>
+    <label class="field check"><input id="set-splash" type="checkbox"> Show the QR code start screen</label>
+    <p class="hint">The screen with the panel address and QR code, shown for the first 10 seconds after the player starts, with the localhost and network addresses.</p>
     <h3>Panel PIN</h3>
     <p id="pin-state" class="hint"></p>
     <label class="field">New PIN (4 to 8 digits)
@@ -110,6 +162,7 @@
 
 <div id="toast" role="status" aria-live="polite"></div>
 
+<script src="/shared/clienterr.js"></script>
 <script src="/shared/geometry.js"></script>
 <script src="/shared/vmask.js"></script>
 <script src="maskedit.js"></script>

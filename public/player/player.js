@@ -43,6 +43,8 @@
   // Loop sem salto: cada layer tem dois <video> com o mesmo ficheiro. O ativo toca; pouco antes do fim,
   // o outro (já em 0 e com o 1.º frame descodificado) começa a tocar e, assim que apresenta um frame novo,
   // passa a ser o visível. O atributo `loop` simples deixa 1-3 frames parados em cada volta.
+  // Interruptor "player desligado": pára todos os vídeos (o ecrã fica no último frame). Nada chama play() enquanto estiver parado.
+  let halted = false;
   const LEAD = 0.12;   // segundos antes do fim em que o vídeo seguinte arranca
 
   function makeVideo() {
@@ -64,7 +66,7 @@
 
     const standby = () => videos[L.cur ^ 1];
     const startStandby = () => {
-      if (L.starting) return;
+      if (L.starting || halted) return;
       if (standby().readyState < 2) return;                 // reserva ainda não carregou: o 'ended' trata do loop
       L.starting = true;
       standby().play().catch(() => { L.starting = false; });
@@ -82,9 +84,9 @@
       v.addEventListener('loadedmetadata', () => { if (!L.vw) { L.vw = v.videoWidth; L.vh = v.videoHeight; } applyGeometry(L); });
       v.addEventListener('error', () => console.warn('[player] video error', L.srcName, v.error && v.error.message));
       v.addEventListener('ended', () => {                   // rede de segurança
-        if (i !== L.cur || L.starting) return;
+        if (i !== L.cur || L.starting || halted) return;
         startStandby();
-        if (!L.starting && L.cfg && L.cfg.visible) { v.currentTime = 0; v.play().catch(() => {}); }  // sem reserva: loop simples
+        if (!L.starting && L.cfg && L.cfg.visible && !halted) { v.currentTime = 0; v.play().catch(() => {}); }  // sem reserva: loop simples
       });
       const onFrame = (now, meta) => {
         if (i === L.cur) {
@@ -136,8 +138,17 @@
 
     // Layer escondida: pausa para poupar CPU. Ao mostrar, retoma.
     L.el.style.visibility = c.visible ? 'visible' : 'hidden';
-    if (c.visible && c.video) { if (L.video.paused && !L.starting) L.video.play().catch(() => {}); }
+    if (c.visible && c.video) { if (L.video.paused && !L.starting && !halted) L.video.play().catch(() => {}); }
     else { L.videos.forEach(v => { if (!v.paused) v.pause(); }); L.starting = false; }
+  }
+
+  // Pára/retoma todos os vídeos. Ao parar, a reserva do loop (se já tinha começado) volta ao início.
+  function setHalted(on) {
+    halted = !!on;
+    for (const L of layers.values()) {
+      if (halted) { L.starting = false; const sb = L.videos[L.cur ^ 1]; L.videos.forEach(v => v.pause()); try { sb.currentTime = 0; } catch {} }
+      else if (L.cfg && L.cfg.visible && L.cfg.video && L.video.paused) L.video.play().catch(() => {});
+    }
   }
 
   function applyConfig(next) {
@@ -210,14 +221,16 @@
   async function loadInfo() {
     try {
       const info = await (await fetch('/api/info', { cache: 'no-store' })).json();
+      document.getElementById('splash-local').textContent = `localhost:${info.port}`;
       document.getElementById('splash-url').textContent = (info.urls[0] || `http://<IP>:${info.port}`).replace('http://', '');
-      document.getElementById('splash-mdns').textContent = info.mdns.replace('http://', '');
+      document.getElementById('splash-mdns').textContent = info.mdns ? info.mdns.replace('http://', '') : '';
       document.getElementById('splash-qr').innerHTML = info.qr || '';
     } catch { setTimeout(loadInfo, 2000); }
   }
   function updateSplash() {
-    const empty = !cfg || cfg.layers.length === 0;
-    splash.hidden = !(empty || performance.now() < splashUntil);
+    // O ecrã do QR (Settings → Show the QR code start screen) aparece só nos primeiros segundos; depois mostra sempre o output.
+    const on = !cfg || cfg.splash !== false;
+    splash.hidden = !(on && performance.now() < splashUntil);
   }
   setInterval(updateSplash, 500);
 
@@ -225,7 +238,7 @@
   let retry = 500;
   let sock = null;
   function connect() {
-    const ws = sock = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+    const ws = sock = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?role=player`);
     ws.onopen = () => { retry = 500; };
     ws.onmessage = ev => {
       let msg; try { msg = JSON.parse(ev.data); } catch { return; }
@@ -236,6 +249,7 @@
       else if (msg.type === 'config') applyConfig(msg.config);
       else if (msg.type === 'maskEdit') { editing = { id: msg.id, shape: msg.shape }; if (!msg.id) cursor = null; drawEdit(); }
       else if (msg.type === 'maskCursor') { cursor = msg.x == null ? null : { x: msg.x, y: msg.y }; placeCursor(); }
+      else if (msg.type === 'player') setHalted(!msg.on);
       else if (msg.type === 'debug') setReporting(!!msg.on);       // há um painel a ver o debug
     };
     ws.onclose = () => { setReporting(false); editing = { id: null, shape: -1 }; cursor = null; drawEdit(); setTimeout(connect, retry); retry = Math.min(retry * 2, 5000); };
@@ -274,11 +288,12 @@
       hud.textContent = `screen ${fps.toFixed(0)} fps | layers ${layers.size} | dropped ${dropped}/${total}\n` + sysLine;
     }, 1000);
     // CPU %, GPU % e temperatura vêm do servidor (lê /proc e os contadores do V3D).
-    let sysLine = 'CPU - | GPU - | - °C';
+    let sysLine = 'CPU - | GPU - | - °C | RAM -';
     setInterval(async () => {
       try {
         const s = await (await fetch('/api/stats', { cache: 'no-store' })).json();
-        sysLine = `CPU ${s.cpu ?? '-'}% | GPU ${s.gpu ?? '-'}% | ${s.temp ?? '-'} °C`;
+        const gb = mb => (mb / 1024).toFixed(1);
+        sysLine = `CPU ${s.cpu ?? '-'}% | GPU ${s.gpu ?? '-'}% | ${s.temp ?? '-'} °C | RAM ` + (s.ram ? `used ${gb(s.ram.used)} GB, free ${gb(s.ram.free)} GB / ${gb(s.ram.total)} GB` : '-');
       } catch {}
     }, 1000);
   }

@@ -6,10 +6,11 @@
  */
 const crypto = require('crypto');
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const RESOLUTIONS = [[1920, 1080], [1280, 720]];
 const MAX_LAYERS = 32;
-const CONVERT_SIZES = [[640, 480], [800, 600]];   // tamanho máximo dos vídeos convertidos
+const CONVERT_SIZE = [64, 4096];                  // largura e altura máximas da conversão (qualquer inteiro neste intervalo)
+const DEFAULT_CONVERT_SIZE = [960, 540];
 const CONVERT_FPS = [25, 30];
 
 // [mínimo, máximo] aceites por campo numérico; valores fora do intervalo são cortados.
@@ -17,6 +18,7 @@ const LIMITS = {
   maskScale: [0.01, 20],
   videoScale: [0.01, 20],
   scale: [0.01, 20],
+  rotation: [-360, 360],       // graus
   videoOffsetX: [-5000, 5000],
   videoOffsetY: [-5000, 5000],
   x: [-10000, 10000],
@@ -33,6 +35,7 @@ const VMASK_MAX_TOTAL = 1500;    // em toda a máscara
 const NAME_MAX = 80;
 const PIN_RE = /^\d{4,8}$/;
 
+const validConvertSize = (w, h) => [w, h].every(v => Number.isInteger(v) && v >= CONVERT_SIZE[0] && v <= CONVERT_SIZE[1]);
 const clamp = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
 const num = (v, d, lim) => (typeof v === 'number' && Number.isFinite(v) ? (lim ? clamp(v, lim) : v) : d);
 const newId = () => crypto.randomBytes(6).toString('hex');
@@ -81,6 +84,7 @@ function normalizeLayer(l, output) {
     id: typeof l.id === 'string' && /^[\w-]{1,40}$/.test(l.id) ? l.id : newId(),
     name: (typeof l.name === 'string' && l.name.trim() ? l.name : 'Layer').slice(0, NAME_MAX),
     visible: l.visible !== false,
+    locked: l.locked === true,                       // só impede escolher/mover a layer na pré-visualização do painel
     video: mediaName(l.video),
     mask: mediaName(l.mask),
     maskScale: num(l.maskScale, 1, LIMITS.maskScale),
@@ -92,6 +96,7 @@ function normalizeLayer(l, output) {
     x: num(l.x, output.width / 2, LIMITS.x),         // centro da layer, em píxeis de saída
     y: num(l.y, output.height / 2, LIMITS.y),
     scale: num(l.scale, 1, LIMITS.scale),
+    rotation: num(l.rotation, 0, LIMITS.rotation),   // em torno do centro, graus, sentido horário
     pins: [0, 1, 2, 3].map(i => ({                    // TL, TR, BR, BL
       x: num(pins[i] && pins[i].x, 0, LIMITS.pin),
       y: num(pins[i] && pins[i].y, 0, LIMITS.pin),
@@ -114,14 +119,15 @@ function normalize(c) {
     seen.add(l.id); layers.push(l);
   }
   const cv = c.convert || {};
-  const okSize = CONVERT_SIZES.some(([w, h]) => w === cv.maxWidth && h === cv.maxHeight);
-  const convert = { maxWidth: okSize ? cv.maxWidth : 640, maxHeight: okSize ? cv.maxHeight : 480, fps: CONVERT_FPS.includes(cv.fps) ? cv.fps : 30,
+  const okSize = validConvertSize(cv.maxWidth, cv.maxHeight);
+  const convert = { maxWidth: okSize ? cv.maxWidth : DEFAULT_CONVERT_SIZE[0], maxHeight: okSize ? cv.maxHeight : DEFAULT_CONVERT_SIZE[1], fps: CONVERT_FPS.includes(cv.fps) ? cv.fps : 30,
     process: cv.process !== false };      // false = guarda os vídeos como vêm (já comprimidos, ex.: HandBrake)
   return {
     version: SCHEMA_VERSION,
     rev: Number.isInteger(c.rev) && c.rev >= 0 ? c.rev : 0,    // sobe a cada alteração (sincronização)
     output,
     convert,
+    splash: c.splash !== false,                                 // ecrã inicial com o QR code (endereço do painel)
     pinHash: typeof c.pinHash === 'string' ? c.pinHash : '',    // '' = sem PIN
     layers,
   };
@@ -142,7 +148,7 @@ function verifyPin(pin, hash) {
 }
 
 // Versão enviada aos clientes: nunca inclui o hash do PIN.
-const publicConfig = c => ({ version: c.version, rev: c.rev, output: c.output, hasPin: !!c.pinHash, convert: c.convert, layers: c.layers });
+const publicConfig = c => ({ version: c.version, rev: c.rev, output: c.output, hasPin: !!c.pinHash, convert: c.convert, splash: c.splash, layers: c.layers });
 
 // ---------- operações ----------
 class OpError extends Error {}
@@ -152,8 +158,8 @@ const findIndex = (c, id) => {
   return i;
 };
 // Campos que o painel pode alterar (o id nunca muda).
-const PATCHABLE = ['name', 'visible', 'video', 'mask', 'vmask', 'maskScale', 'maskMode', 'videoScale', 'videoOffsetX',
-  'videoOffsetY', 'x', 'y', 'scale', 'pins'];
+const PATCHABLE = ['name', 'visible', 'locked', 'video', 'mask', 'vmask', 'maskScale', 'maskMode', 'videoScale', 'videoOffsetX',
+  'videoOffsetY', 'x', 'y', 'scale', 'rotation', 'pins'];
 
 // Aplica uma operação e devolve uma configuração nova (a original não é alterada).
 function applyOp(config, op) {
@@ -173,7 +179,7 @@ function applyOp(config, op) {
       if (c.layers.length >= MAX_LAYERS) throw new OpError(`maximum of ${MAX_LAYERS} layers`);
       const i = findIndex(c, op.id);
       const copy = { ...c.layers[i], id: undefined, name: (c.layers[i].name + ' (copy)').slice(0, NAME_MAX),
-        x: c.layers[i].x + 40, y: c.layers[i].y + 40 };
+        x: c.layers[i].x + 40, y: c.layers[i].y + 40, locked: false };   // a cópia é para mexer
       c.layers.splice(i + 1, 0, normalizeLayer(copy, c.output));   // fica logo acima do original
       break;
     }
@@ -199,8 +205,11 @@ function applyOp(config, op) {
       c.output = { width: op.width, height: op.height };
       break;
     }
+    case 'setSplash':
+      c.splash = op.enabled !== false;
+      break;
     case 'setConvert': {
-      if (!CONVERT_SIZES.some(([w, h]) => w === op.width && h === op.height) || !CONVERT_FPS.includes(op.fps)) throw new OpError('invalid conversion settings');
+      if (!validConvertSize(op.width, op.height) || !CONVERT_FPS.includes(op.fps)) throw new OpError('invalid conversion settings');
       c.convert = { maxWidth: op.width, maxHeight: op.height, fps: op.fps, process: op.process !== false };
       break;
     }
@@ -217,5 +226,5 @@ function applyOp(config, op) {
   return out;
 }
 
-module.exports = { normalize, applyOp, publicConfig, verifyPin, hashPin, OpError, LIMITS, RESOLUTIONS, MAX_LAYERS, SCHEMA_VERSION,
+module.exports = { validConvertSize, normalize, applyOp, publicConfig, verifyPin, hashPin, OpError, LIMITS, RESOLUTIONS, MAX_LAYERS, SCHEMA_VERSION,
   VMASK_MAX_SHAPES, VMASK_MAX_POINTS, VMASK_MAX_TOTAL };

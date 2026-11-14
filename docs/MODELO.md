@@ -7,9 +7,11 @@ e `server/lib/config.js` (gravação em disco). O player desenha em `public/play
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "rev": 42,
   "output": { "width": 1920, "height": 1080 },
+  "convert": { "maxWidth": 960, "maxHeight": 540, "fps": 30, "process": true },
+  "splash": true,
   "pinHash": "",
   "layers": [ { "...": "ver abaixo" } ]
 }
@@ -20,6 +22,8 @@ e `server/lib/config.js` (gravação em disco). O player desenha em `public/play
 | `version` | Versão do formato (para migrações futuras). |
 | `rev` | Sobe a cada alteração. Serve para os clientes saberem se estão atualizados. |
 | `output` | Resolução de saída: só `1920×1080` ou `1280×720`. Outro valor volta a 1920×1080. |
+| `convert` | Conversão no upload: caixa máxima (`maxWidth`×`maxHeight`, qualquer inteiro de 64 a 4096; por omissão 960×540), `fps` (25 ou 30) e `process` (`false` = guarda os vídeos como vêm). Cada upload pode levar o seu tamanho (`X-Max-Size`). |
+| `splash` | `true` = mostra o ecrã com o QR code e o endereço do painel nos primeiros 10 segundos depois de o player arrancar (com `localhost:PORTA` e o endereço da rede). |
 | `pinHash` | Hash scrypt com sal do PIN (4 a 8 dígitos). Vazio = sem PIN. **Nunca é enviado aos clientes**; estes recebem apenas `hasPin`. |
 | `layers` | Lista **da de baixo para a de cima**: índice 0 = fundo, último = topo (é o z-index). Máximo 32. |
 
@@ -30,6 +34,7 @@ e `server/lib/config.js` (gravação em disco). O player desenha em `public/play
 | `id` | gerado | `[\w-]{1,40}` | Identificador estável; nunca muda. |
 | `name` | `Layer` | 80 car. | Nome no painel. |
 | `visible` | `true` | | Escondida = fica em pausa. |
+| `locked` | `false` | | Bloqueada: **só afeta o painel** (não se escolhe nem se move na pré-visualização). O player ignora-o. Duplicar dá uma cópia desbloqueada. |
 | `video` | `null` | nome de ficheiro | Ficheiro em `data/media/` (só o nome, sem caminhos). |
 | `mask` | `null` | nome de ficheiro | PNG em `data/media/`. |
 | `maskScale` | 1 | 0,01 a 20 | Escala da máscara dentro da caixa (1 = tamanho exato do PNG). |
@@ -39,6 +44,7 @@ e `server/lib/config.js` (gravação em disco). O player desenha em `public/play
 | `videoOffsetX/Y` | 0 | ±5000 | Deslocamento do vídeo dentro da caixa (px da caixa). |
 | `x`, `y` | centro do ecrã | ±10000 | Posição do **centro** da layer, em píxeis de saída. |
 | `scale` | 1 | 0,01 a 20 | Escala da layer, em torno do seu centro. |
+| `rotation` | 0 | ±360 | Rotação da layer em graus, sentido horário, em torno do centro. |
 | `pins` | 4×`{0,0}` | ±3000 | Corner pin: deslocamento de cada canto, em píxeis de saída. Ordem: TL, TR, BR, BL. |
 
 Valores fora dos limites são cortados; valores inválidos voltam ao padrão. Nomes de ficheiro com `/`, `\` ou
@@ -76,8 +82,8 @@ Para cada layer, por esta ordem:
 2. **Máscara no espaço da layer.** A máscara tem o tamanho da caixa, escalada por `maskScale` (1 = exata) e
    centrada. Aplica-se à caixa já com o vídeo. Ainda não há posição nem corner pin: a máscara acompanha tudo
    o que vem a seguir.
-3. **Posição e escala da layer.** A caixa é escalada por `scale` em torno do seu centro e colocada com o
-   centro em `(x, y)`, no espaço da saída.
+3. **Posição, escala e rotação da layer.** A caixa é escalada por `scale` em torno do seu centro, rodada por
+   `rotation` (em torno do mesmo centro) e colocada com o centro em `(x, y)`, no espaço da saída.
 4. **Corner pin (afinação final).** Cada um dos 4 cantos da caixa, já posicionada, é deslocado por `pins[i]`.
    O resultado é uma transformação de perspetiva (homografia) da caixa para o quadrilátero final.
 
@@ -98,6 +104,8 @@ este o formato das mensagens do painel (Fase 3).
 | `moveLayer` | `id`, `index` | Reordena (0 = fundo). |
 | `updateLayer` | `id`, `patch` | Altera só os campos permitidos (nunca o `id`). |
 | `setOutput` | `width`, `height` | Muda a resolução e escala `x`, `y`, `scale` e `pins` para manter a composição. |
+| `setConvert` | `width`, `height`, `fps`, `process` | Definições da conversão no upload (tamanho 64 a 4096). |
+| `setSplash` | `enabled` | Liga/desliga o ecrã do QR code. |
 | `setPin` | `pin` | 4 a 8 dígitos; `""` remove o PIN. |
 
 Operações inválidas lançam `OpError` e não alteram nada.
@@ -116,3 +124,11 @@ Operações inválidas lançam `OpError` e não alteram nada.
 ## Testes
 
 `cd server && npm test` (30 testes: normalização, limites, operações, máscara desenhada, geometria, PIN, falhas de escrita, recuperação).
+
+## Estado fora da configuração (não vai para `config.json`)
+
+- **RUN / EDIT**: estado do servidor. Arranca sempre em RUN. Mensagens do painel: `{type:'edit', on}` e `{type:'edit-ping'}`; o servidor responde a todos com
+  `{type:'edit', editing, editUntil, reason}`. O EDIT termina sozinho sem atividade (5 min) ou quando o último painel se desliga (15 s de tolerância). O player liga-se a `/ws?role=player`; qualquer outra ligação conta como painel.
+- **Player ligado/desligado**: `POST /api/player` com `{"on": true|false}` ou `{"toggle": true}`; o servidor emite `{type:'player', on}`. Desligado = os vídeos param.
+- **Re-conversão**: `POST /api/media/:name/resize` com `{width, height, replace?}` cria `nome_resized_LxA.ext`. Com `replace: true` as layers que usavam o original passam à cópia,
+  compensando `scale` e `videoOffsetX/Y` (só em layers sem máscara) para manterem o mesmo tamanho no ecrã.

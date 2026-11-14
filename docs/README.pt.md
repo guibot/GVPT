@@ -1,5 +1,10 @@
 > Versão completa em português. [English summary](../README.md)
 
+> **Nota (versão 0.2):** este guia descreve a instalação no Raspberry Pi. Há instruções para **Windows, macOS e Linux**, e a lista das novidades da interface
+> (RUN/EDIT, layers bloqueadas, Rotate, biblioteca com seleção múltipla, re-conversão de vídeos, tamanho por upload, player on/off com F9, RAM no debug),
+> no [`README.md`](../README.md) da raiz, em português e em inglês.
+
+
 # GVPT — media server de vídeo com máscaras para o Raspberry Pi 5
 
 Um pequeno media server para um ecrã HDMI. Vários vídeos curtos, em loop e sem áudio, são compostos com
@@ -37,12 +42,12 @@ Num Raspberry Pi 5 com Raspberry Pi OS Bookworm 64-bit (a versão com ambiente d
 sudo apt update
 sudo apt install -y nodejs npm ffmpeg chromium curl avahi-daemon
 
-# 2. Código (copia esta pasta para o Pi, por exemplo para ~/video-player-rp5) e dependências Node
-cd ~/video-player-rp5/server
+# 2. Código (copia esta pasta para o Pi, por exemplo para ~/GVPT) e dependências Node
+cd ~/GVPT/server
 npm install --omit=dev
 
 # 3. Serviço do servidor (arranca com o Pi; pede sudo uma vez)
-cd ~/video-player-rp5
+cd ~/GVPT
 deploy/install-service.sh
 
 # 4. (opcional) Abrir o player no ecrã HDMI sempre que o Pi arranca
@@ -147,7 +152,7 @@ O player, que corre no próprio Pi (localhost), não precisa de PIN. O PIN guard
 ## Onde estão os ficheiros
 
 ```
-video-player-rp5/
+GVPT/
 ├── kiosk                      interruptor do modo kiosk (on / off / status)
 ├── deploy/
 │   ├── install-service.sh     instala/remove o serviço systemd
@@ -179,7 +184,7 @@ Variáveis de ambiente do servidor: `PORT` (por omissão `8080`) e `DATA_DIR` (p
 A configuração são as layers e as definições. Os ficheiros de media são maiores.
 
 ```bash
-cd ~/video-player-rp5
+cd ~/GVPT
 # só a configuração (pequena)
 cp data/config.json ~/config-$(date +%F).json
 

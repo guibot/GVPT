@@ -30,6 +30,9 @@
   let flushTimer = null;
   let jobs = [];                  // conversões no servidor
   const uploads = [];             // envios deste browser: {name, pct, error, done}
+  let editState = { editing: false, editUntil: 0 };   // modo RUN / EDIT (estado do servidor)
+  let playerOn = null;            // vídeos a correr? (null = ainda não sei)
+  const baseName = n => n;        // (sem pastas de cena: o nome é o próprio ficheiro)
 
   const layerById = id => cfg && cfg.layers.find(l => l.id === id);
   const mediaByName = n => media.find(m => m.name === n);
@@ -67,6 +70,8 @@
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       if (m.type === 'hello') { if (boot && m.boot !== boot) { flush(); location.reload(); return; } boot = m.boot; }
       else if (m.type === 'config') onConfig(m.config);
+      else if (m.type === 'edit') onEdit(m);
+      else if (m.type === 'player') { playerOn = !!m.on; renderPlayer(); }
       else if (m.type === 'jobs') { jobs = m.jobs; renderQueue(); }
       else if (m.type === 'media') refreshMedia();
       else if (m.type === 'stats') renderDebug(m);
@@ -119,13 +124,27 @@
     editor.sync();
   }
 
+  let mediaSeq = 0;               // respostas antigas (que chegam depois de uma mais recente) são descartadas
   async function refreshMedia() {
+    const mine = ++mediaSeq;
     const r = await api('/api/media').catch(() => null);
-    if (!r || !r.ok) return;
+    if (!r || !r.ok || mine !== mediaSeq) return;
     const before = mediaSig();
     media = r.json;
     if (before !== mediaSig() && cfg) renderAll();
     renderLibrary();
+  }
+
+  // Ícone de cadeado (SVG, para não depender de fontes de emojis).
+  function lockIcon(locked) {
+    const NS = 'http://www.w3.org/2000/svg', sv = document.createElementNS(NS, 'svg');
+    sv.setAttribute('viewBox', '0 0 16 16'); sv.setAttribute('width', '14'); sv.setAttribute('height', '14'); sv.setAttribute('aria-hidden', 'true');
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('fill', locked ? 'currentColor' : 'none'); p.setAttribute('stroke', 'currentColor'); p.setAttribute('stroke-width', '1.6');
+    p.setAttribute('stroke-linejoin', 'round'); p.setAttribute('stroke-linecap', 'round');
+    p.setAttribute('d', locked ? 'M4.5 7V5a3.5 3.5 0 0 1 7 0v2M3 7h10v7H3z' : 'M4.5 7V5a3.5 3.5 0 0 1 6.8-1.2M3 7h10v7H3z');
+    sv.append(p);
+    return sv;
   }
 
   // ---------- lista de layers ----------
@@ -134,7 +153,7 @@
   function renderList() {
     if (reorder) { reorder.stale = true; return; }          // não reconstruir a lista a meio de um arrasto
     const ul = $('#layer-list');
-    const sig = JSON.stringify([cfg.layers.map(l => [l.id, l.name, l.visible, l.video, l.mask, l.vmask]), sel, mediaSig()]);
+    const sig = JSON.stringify([cfg.layers.map(l => [l.id, l.name, l.visible, l.locked, l.video, l.mask, l.vmask]), sel, mediaSig()]);
     if (sig === listSig) return;
     listSig = sig;
     ul.textContent = '';
@@ -142,12 +161,14 @@
     // O topo da lista é a layer de cima (último do array).
     [...cfg.layers].map((l, i) => [l, i]).reverse().forEach(([l, i]) => {
       const m = mediaByName(l.video);
-      const li = h('li', { class: 'li' + (l.id === sel ? ' sel' : '') + (l.visible ? '' : ' hidden-layer') },
+      const li = h('li', { class: 'li' + (l.id === sel ? ' sel' : '') + (l.visible ? '' : ' hidden-layer') + (l.locked ? ' locked' : '') },
         h('div', { class: 'li-main', onclick: () => select(l.id) },
           h('div', { class: 'li-grip', title: 'Drag to reorder', 'aria-label': 'Drag to reorder', text: '⋮⋮', onpointerdown: e => startReorder(e, l.id) }),
           h('div', { class: 'li-thumb', style: m ? `background-image:url("${thumbUrl(m)}")` : '' }),
           l.vmask || l.mask ? h('div', { class: 'li-mask', title: l.vmask ? 'drawn mask' : l.mask }, maskPreviewCss(layerMaskCss(l))) : null,
           h('div', { class: 'li-name', text: l.name }),
+          h('button', { class: 'li-lock' + (l.locked ? ' on' : ''), title: l.locked ? 'Unlock: can be picked and moved in the preview' : 'Lock: cannot be picked or moved in the preview',
+            'aria-label': l.locked ? 'Unlock' : 'Lock', 'aria-pressed': !!l.locked, onclick: e => { e.stopPropagation(); patchLayer(l.id, { locked: !l.locked }); } }, lockIcon(l.locked)),
           h('button', { class: 'li-eye', title: l.visible ? 'Hide' : 'Show', 'aria-label': l.visible ? 'Hide' : 'Show',
             text: l.visible ? '●' : '○', onclick: e => { e.stopPropagation(); patchLayer(l.id, { visible: !l.visible }); } })));
       if (l.id === sel) li.append(h('div', { class: 'li-actions' },
@@ -204,7 +225,7 @@
   function select(id) { if (id !== sel) editor.stop(); sel = id; renderAll(); }
 
   // ---------- propriedades ----------
-  const LIM = { scale: [0.01, 20], maskScale: [0.01, 20], videoScale: [0.01, 20], videoOffset: [-5000, 5000], xy: [-10000, 10000], pin: [-3000, 3000] };
+  const LIM = { rotation: [-360, 360], scale: [0.01, 20], maskScale: [0.01, 20], videoScale: [0.01, 20], videoOffset: [-5000, 5000], xy: [-10000, 10000], pin: [-3000, 3000] };
   let propsKey = '';
   let rows = [];                  // controlos numéricos, para sincronizar valores
   const selects = [];             // [{el, key}]
@@ -277,7 +298,21 @@
       sl.value = cur || '';
     };
     fill();
-    sl.addEventListener('change', () => patchLayer(sel, { [key]: sl.value || null }));
+    sl.addEventListener('change', () => {
+      const l = layerById(sel), p = { [key]: sl.value || null };
+      // Sem máscara a caixa da layer é o próprio vídeo: trocar por um de outro tamanho (ex.: um _resized_) encolheria a layer no ecrã.
+      // Compensa o scale e o offset do vídeo na proporção inversa para a layer ficar com o mesmo tamanho visual.
+      if (key === 'video' && l && !l.mask && !l.vmask) {
+        const o = mediaByName(l.video), n = mediaByName(sl.value);
+        if (o && n && o.width && n.width && o.width !== n.width) {
+          const k = o.width / n.width;
+          p.scale = +Math.min(LIM.scale[1], Math.max(LIM.scale[0], l.scale * k)).toFixed(4);
+          p.videoOffsetX = +Math.min(5000, Math.max(-5000, l.videoOffsetX / k)).toFixed(2);
+          p.videoOffsetY = +Math.min(5000, Math.max(-5000, l.videoOffsetY / k)).toFixed(2);
+        }
+      }
+      patchLayer(sel, p);
+    });
     sl.addEventListener('focus', refreshMedia);
     selects.push(() => { if (document.activeElement !== sl) fill(); });
     return h('label', { class: 'field' }, label, sl);
@@ -290,7 +325,15 @@
     const L = () => layerById(sel);
     const patch = p => patchLayer(sel, p);
     const W = cfg.output.width, H = cfg.output.height;
-    const group = (title, ...kids) => h('div', { class: 'group' }, h('div', { class: 'gt', text: title }), ...kids);
+    const group = (title, ...kids) => h('div', { class: 'group' }, title instanceof Node ? title : h('div', { class: 'gt', text: title }), ...kids);
+    // Título "Layer Transform" com o tamanho atual da layer no ecrã (caixa × escala), a atualizar com o Scale.
+    const sizeEl = h('span', { class: 'gt-size' });
+    rows.push(() => {
+      const ly = L(); if (!ly) return;
+      const [bw, bh] = boxDims(ly);
+      sizeEl.textContent = `${Math.round(bw * ly.scale)} × ${Math.round(bh * ly.scale)} px`;
+    });
+    const transformTitle = h('div', { class: 'gt' }, 'Layer Transform', sizeEl);
     const g2 = (...kids) => h('div', { class: 'g2' }, ...kids);
 
     const name = h('input', { type: 'text', maxlength: 80, 'aria-label': 'Name' });
@@ -305,10 +348,11 @@
         h('label', { class: 'field' }, 'NAME', name),
         mediaSelect('VIDEO', 'video', 'video'),
         mediaSelect('MASK', 'mask', 'mask')),
-      group('Position',
+      group(transformTitle,
         g2(numRow('X', [0, W], LIM.xy, 1, () => L().x, v => patch({ x: v })),
            numRow('Y', [0, H], LIM.xy, 1, () => L().y, v => patch({ y: v }))),
-        numRow('Scale', [0.1, 5], LIM.scale, 0.01, () => L().scale, v => patch({ scale: v }))),
+        numRow('Scale', [0.1, 5], LIM.scale, 0.01, () => L().scale, v => patch({ scale: v })),
+        numRow('Rotate', [-180, 180], LIM.rotation, 0.1, () => L().rotation || 0, v => patch({ rotation: v }))),
       group('Mask',
         modeSeg,
         h('div', { class: 'row-btns tight' },
@@ -397,7 +441,7 @@
     // contorno e pegas da layer selecionada
     const l = layerById(sel);
     overlay.style.zIndex = 1000;
-    handles.forEach(e => { e.style.zIndex = 1001; e.style.display = l && !editor.active ? '' : 'none'; });   // a desenhar: sem pegas de canto
+    handles.forEach(e => { e.style.zIndex = 1001; e.style.display = l && !l.locked && !editor.active && editState.editing ? '' : 'none'; });   // a desenhar: sem pegas de canto
     poly.style.display = l ? '' : 'none';
     editor.render();
     if (!l) return;
@@ -429,18 +473,18 @@
 
   let drag = null;
   preview.addEventListener('pointerdown', e => {
-    if (!cfg) return;
+    if (!cfg || !editState.editing) return;                  // em RUN só se observa
     if (editor.active) { editor.down(point(e)); preview.setPointerCapture(e.pointerId); e.preventDefault(); return; }
     const p = point(e), hEl = e.target.closest && e.target.closest('.handle');
     if (hEl) {                                              // arrastar um canto (corner pin)
-      const l = layerById(sel); if (!l) return;
+      const l = layerById(sel); if (!l || l.locked) return;
       const i = +hEl.dataset.i, g = geo(l);
       drag = { mode: 'pin', i, grab: [p[0] - g.pinned[i][0], p[1] - g.pinned[i][1]], el: hEl };
       hEl.classList.add('drag');
     } else {                                                // selecionar / mover a layer
       let l = layerById(sel);
-      if (!(l && inQuad(p, geo(l).pinned))) {
-        l = [...cfg.layers].reverse().find(x => x.visible && inQuad(p, geo(x).pinned));
+      if (!(l && !l.locked && inQuad(p, geo(l).pinned))) {                    // layers bloqueadas não se escolhem nem se movem aqui
+        l = [...cfg.layers].reverse().find(x => x.visible && !x.locked && inQuad(p, geo(x).pinned));
         if (!l) return;
         select(l.id);
       }
@@ -470,7 +514,7 @@
   new ResizeObserver(() => { if (cfg) scheduleRender(); }).observe(wrap);
   addEventListener('resize', () => { if (cfg) scheduleRender(); });
 
-  function renderAll() { renderList(); syncProps(); renderPreview(); }
+  function renderAll() { renderList(); syncProps(); renderPreview(); renderMonitor(); }
 
   // ---------- botões, separadores ----------
   $('#btn-add').addEventListener('click', () => {
@@ -489,17 +533,36 @@
   function syncSettings() {
     if (!cfg) return;
     $('#set-res').value = `${cfg.output.width}x${cfg.output.height}`;
-    $('#set-conv-size').value = `${cfg.convert.maxWidth}x${cfg.convert.maxHeight}`; $('#set-conv-fps').value = String(cfg.convert.fps);
+    const sz = `${cfg.convert.maxWidth}x${cfg.convert.maxHeight}`, csel = $('#set-conv-size');
+    csel.value = sz;
+    if (csel.value !== sz) csel.value = 'custom';              // tamanho que não é um preset
+    $('#conv-custom').hidden = csel.value !== 'custom' || cfg.convert.process === false;
+    if (document.activeElement !== $('#set-conv-w')) $('#set-conv-w').value = cfg.convert.maxWidth;
+    if (document.activeElement !== $('#set-conv-h')) $('#set-conv-h').value = cfg.convert.maxHeight;
+    $('#set-conv-fps').value = String(cfg.convert.fps);
     $('#set-conv-on').checked = cfg.convert.process !== false;
-    $('#set-conv-size').disabled = $('#set-conv-fps').disabled = cfg.convert.process === false;
+    $('#set-conv-size').disabled = $('#set-conv-fps').disabled = $('#set-conv-w').disabled = $('#set-conv-h').disabled = cfg.convert.process === false;
+    $('#set-splash').checked = cfg.splash !== false;
     $('#pin-state').textContent = cfg.hasPin ? 'The panel is protected by a PIN.' : 'No PIN: anyone on the local network can control the screen.';
     $('#btn-pin-remove').hidden = !cfg.hasPin; $('#btn-logout').hidden = !cfg.hasPin;
   }
   $('#btn-settings').addEventListener('click', () => { $('#set-msg').textContent = ''; $('#set-pin').value = ''; syncSettings(); dlg.showModal(); });
   $('#set-res').addEventListener('change', e => { const [w, hh] = e.target.value.split('x').map(Number); sendOp({ op: 'setOutput', width: w, height: hh }); });
-  const sendConvert = () => { const [w, hh] = $('#set-conv-size').value.split('x').map(Number); sendOp({ op: 'setConvert', width: w, height: hh, fps: +$('#set-conv-fps').value, process: $('#set-conv-on').checked }); };
+  $('#set-splash').addEventListener('change', e => sendOp({ op: 'setSplash', enabled: e.target.checked }));
+  const sendConvert = () => {
+    let w, hh;
+    if ($('#set-conv-size').value === 'custom') { w = parseInt($('#set-conv-w').value, 10); hh = parseInt($('#set-conv-h').value, 10); }
+    else [w, hh] = $('#set-conv-size').value.split('x').map(Number);
+    const ok = v => Number.isInteger(v) && v >= 64 && v <= 4096;
+    if (!ok(w) || !ok(hh)) { toast('Size must be between 64 and 4096'); $('#set-conv-w').value = cfg.convert.maxWidth; $('#set-conv-h').value = cfg.convert.maxHeight; syncSettings(); return; }
+    sendOp({ op: 'setConvert', width: w, height: hh, fps: +$('#set-conv-fps').value, process: $('#set-conv-on').checked });
+  };
+  $('#set-conv-w').addEventListener('change', sendConvert);
+  $('#set-conv-h').addEventListener('change', sendConvert);
   $('#set-conv-on').addEventListener('change', sendConvert);
-  $('#set-conv-size').addEventListener('change', sendConvert);
+  $('#set-conv-size').addEventListener('change', () => {
+    if ($('#set-conv-size').value === 'custom') { $('#conv-custom').hidden = false; $('#set-conv-w').focus(); } else sendConvert();
+  });
   $('#set-conv-fps').addEventListener('change', sendConvert);
   async function savePin(pin) {
     const r = await api('/api/pin', { pin });
@@ -523,34 +586,66 @@
     }
     renderQueue(); runUploads();
   }
+  // Dimensões (como se veem) de um vídeo local, lidas pelo browser; null se não as conseguir ler.
+  function probeVideo(f) {
+    return new Promise(resolve => {
+      if (!f.type.startsWith('video/')) return resolve(null);
+      const v = document.createElement('video'), u = URL.createObjectURL(f);
+      const done = r => { clearTimeout(t); URL.revokeObjectURL(u); v.removeAttribute('src'); resolve(r); };
+      const t = setTimeout(() => done(null), 2500);
+      v.preload = 'metadata'; v.muted = true;
+      v.onloadedmetadata = () => done(v.videoWidth && v.videoHeight ? [v.videoWidth, v.videoHeight] : null);
+      v.onerror = () => done(null);
+      v.src = u;
+    });
+  }
+  // Caixa máxima deste ficheiro: a das definições, virada se o vídeo tiver a orientação oposta.
+  function boxFor(dims) {
+    let w = cfg.convert.maxWidth, hh = cfg.convert.maxHeight;
+    if (dims && w !== hh && (dims[0] >= dims[1]) !== (w >= hh)) [w, hh] = [hh, w];
+    return [w, hh];
+  }
   const queueUploads = []; let uploading = false;
   async function runUploads() {          // um envio de cada vez (ligações móveis são lentas)
     if (uploading) return; uploading = true;
     while (queueUploads.length) {
       const [f, up] = queueUploads.shift();
+      if (cfg.convert.process !== false && /\.(png)$/i.test(f.name) === false) { up.size = boxFor(await probeVideo(f)); renderQueue(); }
       await new Promise(resolve => {
         const x = new XMLHttpRequest();
         x.open('PUT', '/api/upload');
         x.setRequestHeader('X-Filename', encodeURIComponent(f.name));
+        if (up.size) x.setRequestHeader('X-Max-Size', `${up.size[0]}x${up.size[1]}`);
         x.upload.onprogress = e => { if (e.lengthComputable) { up.pct = Math.round(100 * e.loaded / e.total); renderQueue(); } };
-        x.onload = () => { if (x.status === 200) up.done = true; else { try { up.error = JSON.parse(x.responseText).error; } catch { up.error = 'erro ' + x.status; } } renderQueue(); resolve(); };
+        x.onload = () => { if (x.status === 200) {
+          up.done = true;
+          try { up.kind = JSON.parse(x.responseText).kind; } catch {}
+          if (up.kind === 'mask') { up.doneAt = Date.now(); setTimeout(renderQueue, 6200); }       // PNG: mostra "enviado" uns segundos
+        } else { try { up.error = JSON.parse(x.responseText).error; } catch { up.error = 'erro ' + x.status; } } renderQueue(); resolve(); };
         x.onerror = () => { up.error = 'falha de rede'; renderQueue(); resolve(); };
         x.send(f);
       });
     }
     uploading = false;
+    refreshMedia();                                   // garante a lista final, mesmo que alguma notificação se tenha perdido
   }
 
   function renderQueue() {
     const ul = $('#queue'); ul.textContent = '';
     const rows = [];
-    uploads.forEach((u, i) => { if (!u.done || u.error) rows.push(h('li', { class: 'mrow qrow' },
-      h('div', { class: 'info' }, h('div', { class: 'nm', text: u.name }),
-        u.error ? h('div', { class: 'sub err', text: 'Error: ' + u.error }) : h('div', { class: 'sub', text: `Uploading ${u.pct} %` }),
-        u.error ? null : h('progress', { max: 100, value: u.pct })),
-      u.error ? h('button', { text: '✕', 'aria-label': 'Remove', onclick: () => { uploads.splice(i, 1); renderQueue(); } }) : null)); });
+    uploads.forEach((u, i) => {
+      if (u.done && u.kind === 'mask' && !u.error && Date.now() - u.doneAt < 6000)        // máscara enviada
+        return rows.push(h('li', { class: 'mrow qrow' }, h('div', { class: 'info' }, h('div', { class: 'nm', text: u.name }),
+          h('div', { class: 'sub', text: 'Mask uploaded ✓' }))));
+      if (!u.done || u.error) rows.push(h('li', { class: 'mrow qrow' },
+        h('div', { class: 'info' }, h('div', { class: 'nm', text: u.name }),
+          u.error ? h('div', { class: 'sub err', text: 'Error: ' + u.error }) : h('div', { class: 'sub', text: `Uploading${u.size ? ` · max ${u.size[0]}×${u.size[1]}` : ''} · ${u.pct} %` }),
+          u.error ? null : h('progress', { max: 100, value: u.pct })),
+        u.error ? h('button', { text: '✕', 'aria-label': 'Remove', onclick: () => { uploads.splice(i, 1); renderQueue(); } }) : null)); });
     for (const j of jobs) {
-      const txt = { queued: 'Queued', converting: `Converting ${j.progress} %`, done: 'Done ✓', error: 'Error: ' + j.error }[j.status];
+      const rz = j.kind === 'resize';
+      const txt = { queued: rz ? 'Queued to re-convert' : 'Queued', converting: `${rz ? `Re-converting to ${j.size[0]}×${j.size[1]}` : 'Converting'} ${j.progress} %`,
+        done: rz && j.result ? `Done ✓ → ${j.result}` : 'Done ✓', error: 'Error: ' + j.error }[j.status];
       rows.push(h('li', { class: 'mrow qrow' },
         h('div', { class: 'info' }, h('div', { class: 'nm', text: j.name }), h('div', { class: 'sub' + (j.status === 'error' ? ' err' : ''), text: txt }),
           j.status === 'converting' ? h('progress', { max: 100, value: j.progress }) : null),
@@ -562,21 +657,168 @@
     const b = $('#jobs-badge'); b.hidden = !active; b.textContent = active;
   }
 
+  // Seleção de ficheiros (apagar / re-converter vários de uma vez).
+  const picked = new Set();
+  // Onde um ficheiro está a ser usado: [{ layer: 'Fundo' }]
+  const usesOf = name => (cfg ? cfg.layers : []).filter(l => l.video === name || l.mask === name).map(l => ({ layer: l.name }));
+  const usersOf = name => usesOf(name).map(u => u.layer);                         // para as confirmações
+  function syncPicked() {
+    for (const n of [...picked]) if (!media.some(m => m.name === n)) picked.delete(n);      // já não existem
+    $('#lib-bar').hidden = !media.length;
+    const all = $('#lib-all');
+    all.checked = media.length > 0 && picked.size === media.length;
+    all.indeterminate = picked.size > 0 && picked.size < media.length;
+    $('#btn-resize-sel').disabled = !picked.size;
+    $('#btn-resize-sel').textContent = picked.size ? `Re-convert selected (${picked.size})` : 'Re-convert selected';
+    const b = $('#btn-del-sel');
+    b.disabled = !picked.size; b.textContent = picked.size ? `Delete selected (${picked.size})` : 'Delete selected';
+    document.querySelectorAll('#library .mrow.lib').forEach(li => li.classList.toggle('picked', picked.has(li.dataset.name)));
+  }
+  $('#lib-all').addEventListener('change', e => {
+    picked.clear(); if (e.target.checked) media.forEach(m => picked.add(m.name));
+    document.querySelectorAll('#library .mrow.lib input').forEach(c => { c.checked = e.target.checked; });
+    syncPicked();
+  });
+  $('#btn-del-sel').addEventListener('click', async () => {
+    const names = [...picked];
+    if (!names.length) return;
+    const used = names.map(n => [n, usersOf(n)]).filter(([, u]) => u.length);
+    const list = names.length <= 6 ? names.map(n => `• ${n}`).join('\n') : `${names.length} files`;
+    const warn = used.length ? `\n\n${used.length} of them ${used.length === 1 ? 'is' : 'are'} used by layers (${[...new Set(used.flatMap(([, u]) => u))].join(', ')}); those layers will be left without a file.` : '';
+    if (!confirm(`Delete ${names.length} ${names.length === 1 ? 'file' : 'files'}?\n${list}${warn}`)) return;
+    let failed = 0;
+    for (const n of names) {
+      const r = await api(`/api/media/${encodeURIComponent(n)}?force=1`, undefined, 'DELETE');
+      if (r.ok) picked.delete(n); else failed++;
+    }
+    if (failed) toast(`Could not delete ${failed} ${failed === 1 ? 'file' : 'files'}`);
+    await refreshMedia();
+  });
+
+  // ---------- re-converter (redimensionar) ----------
+  const PRESETS_L = [[1920, 1080], [1280, 720], [960, 540], [640, 360], [480, 270]];
+  const PRESETS_P = PRESETS_L.map(([w, hh]) => [hh, w]);
+  const sizeText = ([w, hh]) => `${w} × ${hh}`;
+  // Cabe numa caixa [bw, bh] sem ampliar? Devolve o tamanho resultante (aproximado) ou null se já cabe.
+  function fitInside(iw, ih, bw, bh) {
+    const k = Math.min(bw / iw, bh / ih);
+    if (!(k < 1)) return null;
+    return [2 * Math.round(iw * k / 2), 2 * Math.round(ih * k / 2)];
+  }
+  // Tamanho de que um vídeo realmente precisa: o maior que ocupa no ecrã (caixa do vídeo × scale da layer) nas layers que o usam.
+  function needSize(m) {
+    let w = 0, hh = 0;
+    for (const l of cfg ? cfg.layers : []) {
+      if (l.video !== m.name) continue;
+      const g = Geometry.compute(l, boxDims(l), vidDims(l));
+      w = Math.max(w, g.video.width * l.scale); hh = Math.max(hh, g.video.height * l.scale);
+    }
+    if (!w) return null;
+    return [Math.max(64, 2 * Math.ceil(w / 2)), Math.max(64, 2 * Math.ceil(hh / 2))];
+  }
+  // Se já existe a cópia com esse tamanho (nome_resized_LxA), a dica deixa de aparecer: já foi feita.
+  const hasCopy = (m, need) => {
+    const out = fitInside(m.width, m.height, need[0], need[1]);
+    const stem = m.name.replace(/\.[^./]+$/, '').replace(/_resized_\d+x\d+$/, '');
+    return !!out && media.some(x => x.name.startsWith(`${stem}_resized_${out[0]}x${out[1]}`));
+  };
+  // Só vale a pena sugerir quando o vídeo precisa claramente de menos que o ficheiro (menos de 90 %).
+  const needsLess = m => { const need = m.kind === 'video' && m.width ? needSize(m) : null; return need && need[0] <= m.width * 0.9 && need[1] <= m.height * 0.9 && !hasCopy(m, need) ? need : null; };
+  // Dica na linha do vídeo: "needs only 320 × 180 px · Fit to usage".
+  function fitHint(m) {
+    const need = needsLess(m);
+    if (!need) return null;
+    return h('div', { class: 'fits' }, h('div', { class: 'fit' }, `Needs only ${sizeText(need)} px`,
+      h('button', { type: 'button', text: 'Fit to usage', title: 'Create a copy at the size the layers need', onclick: () => openResize([m], { fit: true }) })));
+  }
+  async function queueResize(items, box, replace = false) {
+    let n = 0, fail = 0;
+    for (const m of items) {
+      if (!m.width || !fitInside(m.width, m.height, box[0], box[1])) continue;            // já cabe: nada a fazer
+      const r = await api(`/api/media/${encodeURIComponent(m.name)}/resize`, { width: box[0], height: box[1], replace });
+      if (r.ok) n++; else fail++;
+    }
+    if (n) toast(`Re-converting ${n} ${n === 1 ? 'file' : 'files'}${fail ? ` (${fail} failed)` : ''}. The player's videos are paused until it finishes${replace ? '; then the layers switch to the new video' : ''}.`, 'info');
+    else toast(fail ? 'Could not re-convert' : 'Nothing to re-convert: the files already fit', fail ? undefined : 'info');
+    renderQueue();
+  }
+
+  let rsItems = [];
+  const rsBox = () => {
+    const v = $('#rs-size').value;
+    if (v === 'fit') return rsItems.length === 1 ? needSize(rsItems[0]) : null;
+    if (v === 'custom') { const w = parseInt($('#rs-w').value, 10), hh = parseInt($('#rs-h').value, 10); return w >= 64 && w <= 4096 && hh >= 64 && hh <= 4096 ? [w, hh] : null; }
+    return v.split('x').map(Number);
+  };
+  function renderResizePreview() {
+    const box = rsBox(), ul = $('#rs-files'); ul.textContent = '';
+    $('#rs-custom').hidden = $('#rs-size').value !== 'custom';
+    let any = false;
+    for (const m of rsItems) {
+      const res = box && m.width ? fitInside(m.width, m.height, box[0], box[1]) : null;
+      if (res) any = true;
+      ul.append(h('li', {}, h('span', { text: `${m.name}  ${m.width ? sizeText([m.width, m.height]) : ''}` }),
+        h('span', { class: 'res' + (res ? '' : ' skip'), text: !box ? 'choose a valid size' : res ? `→ ${sizeText(res)}` : 'already fits, skipped' })));
+    }
+    $('#rs-go').disabled = !any;
+  }
+  function openResize(items, opts = {}) {
+    rsItems = items.filter(m => m.width);
+    if (!rsItems.length) return toast('Could not read the size of this file');
+    const sl = $('#rs-size'); sl.textContent = '';
+    const one = rsItems.length === 1 && rsItems[0].kind === 'video' ? rsItems[0] : null;
+    const need = one ? needsLess(one) : null;
+    if (need) sl.append(h('option', { value: 'fit', text: `Fit to usage (${sizeText(need)})` }));
+    for (const [label, list] of [['Landscape', PRESETS_L], ['Portrait', PRESETS_P]]) {
+      const g = h('optgroup', { label });
+      for (const p of list) g.append(h('option', { value: p.join('x'), text: sizeText(p) }));
+      sl.append(g);
+    }
+    sl.append(h('option', { value: 'custom', text: 'Custom…' }));
+    // Por omissão: o "Fit to usage"; senão o maior preset que realmente reduz o primeiro vídeo.
+    const first = rsItems[0], pick = [...PRESETS_L, ...PRESETS_P].find(([w, hh]) => fitInside(first.width, first.height, w, hh));
+    sl.value = need ? 'fit' : pick ? pick.join('x') : '640x360';
+    // "Use the copy where the original is used": só com um vídeo que esteja em alguma layer.
+    const used = one && cfg.layers.some(l => l.video === one.name);
+    $('#rs-use-row').hidden = !used; $('#rs-use').checked = !!used; syncUseHint();
+    $('#rs-w').value = 640; $('#rs-h').value = 360;
+    renderResizePreview();
+    $('#resize-dlg').showModal();
+  }
+  const syncUseHint = () => { $('#rs-use-hint').hidden = $('#rs-use-row').hidden || !$('#rs-use').checked; };
+  $('#rs-use').addEventListener('change', syncUseHint);
+  $('#rs-size').addEventListener('change', renderResizePreview);
+  $('#rs-w').addEventListener('input', renderResizePreview); $('#rs-h').addEventListener('input', renderResizePreview);
+  $('#rs-cancel').addEventListener('click', () => $('#resize-dlg').close());
+  $('#rs-go').addEventListener('click', () => {
+    const box = rsBox(); if (!box) return;
+    const replace = !$('#rs-use-row').hidden && $('#rs-use').checked;
+    $('#resize-dlg').close(); queueResize(rsItems, box, replace);
+  });
+  $('#btn-resize-sel').addEventListener('click', () => openResize(media.filter(m => picked.has(m.name))));
+
   function renderLibrary() {
     const ul = $('#library'); ul.textContent = '';
     if (!media.length) ul.append(h('li', { class: 'hint', text: 'The library is empty.' }));
     for (const m of media) {
-      const users = cfg ? cfg.layers.filter(l => l.video === m.name || l.mask === m.name).map(l => l.name) : [];
+      const users = usersOf(m.name), uses = usesOf(m.name);
       const img = m.kind === 'video' ? thumbUrl(m) : maskUrl(m.name);
-      ul.append(h('li', { class: 'mrow' },
+      const cb = h('input', { type: 'checkbox', 'aria-label': `Select ${m.name}`, onchange: e => { e.target.checked ? picked.add(m.name) : picked.delete(m.name); syncPicked(); } });
+      cb.checked = picked.has(m.name);
+      ul.append(h('li', { class: 'mrow lib', 'data-name': m.name }, cb,
         m.kind === 'mask' ? h('div', { class: 'thumb mk' }, maskPreview(m.name))
           : h('div', { class: 'thumb', style: `background-image:url("${img}")` }),
         h('div', { class: 'info' }, h('div', { class: 'nm', text: m.name }),
-          h('div', { class: 'sub', text: `${m.kind === 'video' ? `video ${m.width}×${m.height}` : 'mask'} · ${MB(m.size)}${users.length ? ' · in use: ' + users.join(', ') : ''}` })),
+          h('div', { class: 'sub', text: `${m.kind === 'video' ? 'video' : 'mask'}${m.width ? ` ${m.width}×${m.height}` : ''} · ${MB(m.size)}` }),
+          uses.length ? h('div', { class: 'uses' }, h('b', { text: 'In use' }),
+            uses.map(u => h('span', { class: 'use', title: `Used by the layer “${u.layer}”`, text: u.layer }))) : null,
+          fitHint(m)),
         h('div', { class: 'btns' },
           h('button', { text: 'Rename', onclick: () => renameMedia(m) }),
+          m.kind === 'video' ? h('button', { text: 'Re-convert', title: 'Create a smaller copy of this video', onclick: () => openResize([m]) }) : null,
           h('button', { class: 'danger', text: 'Delete', onclick: () => deleteMedia(m, users) }))));
     }
+    syncPicked();
   }
 
   async function renameMedia(m) {
@@ -612,6 +854,13 @@
   const dbg = $('#debug'), dbtn = $('#btn-debug');
   const lvl = (v, warn, bad) => (v == null ? 'off' : v >= bad ? 'bad' : v >= warn ? 'warn' : '');
   const span = (cls, text) => h('span', { class: cls, text });
+  // RAM: ocupada e livre (livre = disponível para programas). Avisa quando resta pouco.
+  const GB = mb => (mb / 1024).toFixed(1) + ' GB';
+  function ramLine(r) {
+    if (!r) return [span('', 'RAM '), span('off', '-')];
+    const freePct = 100 * r.free / r.total;
+    return [span('', 'RAM used '), span('', GB(r.used)), span('', '  free '), span(freePct < 10 ? 'bad' : freePct < 20 ? 'warn' : '', GB(r.free)), span('off', ` / ${GB(r.total)}`)];
+  }
   function renderDebug(m) {
     if (!debugOn) return;
     const p = m.player;
@@ -623,7 +872,8 @@
       '\n',
       span('', 'CPU '), span(lvl(m.cpu, 70, 90), m.cpu == null ? '-' : m.cpu + '%'),
       span('', '  GPU '), span(lvl(m.gpu, 80, 95), m.gpu == null ? '-' : m.gpu + '%'),
-      span('', '  '), span(lvl(m.temp, 70, 80), m.temp == null ? '- °C' : m.temp + ' °C'));
+      span('', '  '), span(lvl(m.temp, 70, 80), m.temp == null ? '- °C' : m.temp + ' °C'),
+      '\n', ...ramLine(m.ram));
   }
   function setDebug(on) {
     debugOn = on;
@@ -650,11 +900,77 @@
     $('#login-pin').value = '';
   });
 
+  // ---------- ligar e desligar o player ----------
+  // Desligado: só pára os vídeos (o output continua visível, parado) e o Pi descodifica menos. Não pára o Chromium nem o servidor.
+  function renderPlayer() {
+    const b = $('#btn-player');
+    b.hidden = playerOn === null;
+    b.textContent = playerOn ? 'Turn off player' : 'Turn on player';
+    b.classList.toggle('danger-ghost', !!playerOn);
+    b.classList.toggle('on', playerOn === false);
+    renderMonitor();
+  }
+  $('#btn-player').addEventListener('click', async () => {
+    const r = await api('/api/player', { on: !playerOn });
+    if (!r.ok) toast((r.json && r.json.error) || 'Could not change the player');
+  });
+
+  // ---------- modo RUN / EDIT ----------
+  // RUN: só se observa o output (sem layers, propriedades nem arrastar). EDIT: tudo editável; desliga sozinho após 5 min sem atividade.
+  function renderEdit() {
+    const on = !!editState.editing;
+    document.body.classList.toggle('editing', on);
+    $('#btn-run').classList.toggle('on', !on); $('#btn-run').setAttribute('aria-pressed', !on);
+    $('#btn-edit').classList.toggle('on', on); $('#btn-edit').setAttribute('aria-pressed', on);
+    const note = $('#edit-note');
+    note.hidden = !on;
+    if (on) {
+      const left = Math.max(0, Math.round(((editState.editUntil || 0) - Date.now()) / 1000));
+      note.textContent = left < 60 ? `Edit mode ends in ${left} s without activity. Touch the panel to keep it.` : 'Edit mode: changes apply to the output right away.';
+    }
+    renderMonitor();
+  }
+  function renderMonitor() {
+    const el = $('#monitor');
+    if (!el || editState.editing || !cfg) return;
+    const vis = cfg.layers.filter(l => l.visible).length;
+    el.replaceChildren(
+      h('div', {}, 'Mode: ', h('b', { text: 'RUN' }), h('span', { class: 'off', text: '  press EDIT to change layers and media' })),
+      h('div', { class: 'off', text: `${cfg.layers.length} ${cfg.layers.length === 1 ? 'layer' : 'layers'} (${vis} visible) · output ${cfg.output.width}×${cfg.output.height}` }),
+      h('div', { class: 'off', text: playerOn === null ? '' : playerOn ? 'Videos running' : 'Videos stopped (player off)' }));
+  }
+  function onEdit(m) {
+    const was = !!editState.editing;
+    editState = { editing: !!m.editing, editUntil: m.editUntil || 0 };
+    if (was && !m.editing) {
+      flush(); editor.stop(); sel = null;
+      if (m.reason === 'inactivity') toast('Edit mode ended after 5 minutes without activity');
+    }
+    if (!was && m.editing && cfg && !sel) sel = cfg.layers.length ? cfg.layers[cfg.layers.length - 1].id : null;
+    listSig = ''; propsKey = '';
+    renderEdit(); renderAll();
+  }
+  $('#btn-run').addEventListener('click', () => { if (editState.editing) wsSend({ type: 'edit', on: false }); });
+  $('#btn-edit').addEventListener('click', () => { if (!editState.editing) wsSend({ type: 'edit', on: true }); });
+  setInterval(() => { if (editState.editing) renderEdit(); }, 1000);
+  let lastPing = 0;                                                       // atividade no painel: adia o fim automático da edição
+  const ping = () => {
+    if (!editState.editing || Date.now() - lastPing < 5000) return;
+    lastPing = Date.now(); editState.editUntil = Date.now() + 5 * 60 * 1000;
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'edit-ping' }));
+  };
+  addEventListener('pointerdown', ping, true); addEventListener('keydown', ping, true);
+  function wsSend(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); else toast('No connection to the server'); }
+
   // ---------- aviso ----------
   let toastTimer = null;
-  function toast(text) {
-    const t = $('#toast'); t.textContent = text; t.classList.add('show');
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+  // Um <dialog> aberto com showModal() fica numa camada acima de tudo, por isso um aviso no <body> ficava escondido atrás dele.
+  // Enquanto houver um diálogo aberto, o aviso passa a viver dentro dele. `kind` = 'info' para avisos que não são erros.
+  function toast(text, kind) {
+    const t = $('#toast'), host = document.querySelector('dialog[open]') || document.body;
+    if (t.parentNode !== host) host.append(t);
+    t.textContent = text; t.classList.toggle('info', kind === 'info'); t.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), kind === 'info' ? 6000 : 3500);
   }
 
   // ---------- versão (vem do servidor, de server/package.json) ----------

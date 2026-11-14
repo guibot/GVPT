@@ -14,7 +14,7 @@ const COPY_EXT = new Set(['.mp4', '.m4v', '.mov', '.webm']);
 const COPY_CODECS = new Set(['h264', 'vp8', 'vp9', 'av1']);
 
 const probe = file => new Promise((resolve, reject) =>
-  execFile('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,color_transfer,codec_name:format=duration', '-of', 'json', file],
+  execFile('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,color_transfer,codec_name,r_frame_rate:format=duration', '-of', 'json', file],
     { timeout: 30000 }, (err, out) => { if (err) return reject(err); try { resolve(JSON.parse(out)); } catch (e) { reject(e); } }));
 
 // Constrói a cadeia de filtros. Exportada para os testes.
@@ -37,7 +37,7 @@ class Converter extends EventEmitter {
     this._lastEmit = 0;
   }
 
-  list() { return this.jobs.map(({ id, name, status, progress, error }) => ({ id, name, status, progress, error })); }
+  list() { return this.jobs.map(({ id, name, status, progress, error, kind, size, result }) => ({ id, name, status, progress, error, kind, size, result })); }
   _emit(force = true) {
     const now = Date.now();
     if (!force && now - this._lastEmit < 500) return;
@@ -49,13 +49,14 @@ class Converter extends EventEmitter {
     for (const f of fs.readdirSync(this.uploadDir)) {
       const full = path.join(this.uploadDir, f);
       if (f.endsWith('.part') || f.endsWith('.out.mp4')) { try { fs.unlinkSync(full); } catch {} continue; }
-      const m = f.match(/^([0-9a-f]{8})__(.+)$/);
-      if (m) this.enqueue(m[1], full, m[2]);
+      const m = f.match(/^([0-9a-f]{8})__(?:(\d{2,4})x(\d{2,4})__)?(.+)$/);   // id__LxA__nome
+      if (m) this.enqueue(m[1], full, m[4], m[2] ? [+m[2], +m[3]] : null);
     }
   }
 
-  enqueue(id, src, origName) {
-    this.jobs.push({ id, name: origName, src, status: 'queued', progress: 0, error: null });
+  // size = [largura, altura] máximas deste vídeo (por omissão, as das definições).
+  enqueue(id, src, origName, size = null) {
+    this.jobs.push({ id, name: origName, size, src, status: 'queued', progress: 0, error: null });
     this._emit(); this._run();
   }
 
@@ -64,7 +65,7 @@ class Converter extends EventEmitter {
     const j = this.jobs.find(x => x.id === id);
     if (!j) return false;
     if (j.status === 'converting' && this.child) { j.cancelled = true; this.child.kill('SIGKILL'); return true; }
-    if (j.status === 'queued') { try { fs.unlinkSync(j.src); } catch {} }
+    if (j.status === 'queued' && j.src) { try { fs.unlinkSync(j.src); } catch {} }      // (os trabalhos de redimensionar não têm ficheiro temporário)
     this.jobs = this.jobs.filter(x => x !== j);
     this._emit();
     return true;
@@ -81,8 +82,73 @@ class Converter extends EventEmitter {
     this.running = true;
     try {
       let job;
-      while ((job = this.jobs.find(j => j.status === 'queued'))) await this._convert(job);
+      while ((job = this.jobs.find(j => j.status === 'queued'))) await (job.kind === 'resize' ? this._resize(job) : this._convert(job));
     } finally { this.running = false; }
+  }
+
+  // Redimensiona um ficheiro que já está na biblioteca ("cena/ficheiro") para caber numa caixa [L, A]: cria um ficheiro NOVO
+  // `nome_resized_LxA.ext` ao lado (o original não se toca). Só reduz. Vídeo: re-codificação com qualidade máxima prática (CRF 12),
+  // sem áudio, fps constante do original. PNG: lanczos com transparência (sem perdas).
+  // replace = true: as layers que usam este ficheiro passam a usar o novo quando acaba (evento 'resized').
+  enqueueResize(name, size, replace = false) {
+    const id = crypto.randomBytes(4).toString('hex');
+    this.jobs.push({ id, kind: 'resize', name, srcName: name, size, replace, src: null, status: 'queued', progress: 0, error: null });
+    this._emit(); this._run();
+    return id;
+  }
+
+  async _resize(job) {
+    job.status = 'converting'; job.progress = 0; this._emit();
+    const ext = path.extname(job.srcName).toLowerCase(), isPng = ext === '.png';
+    const src = path.join(this.mediaDir, job.srcName);
+    const tmp = path.join(this.uploadDir, `${job.id}.resize${isPng ? '.png' : '.mp4'}`);
+    try {
+      if (!fs.existsSync(src)) throw new Error('the file no longer exists');
+      const info = await probe(src);
+      const st = info.streams && info.streams[0];
+      if (!st || !st.width) throw new Error('could not read the file');
+      const [bw, bh] = job.size;
+      if (st.width <= bw && st.height <= bh) throw new Error(`already ${st.width}×${st.height}: not larger than ${bw}×${bh}`);
+      const duration = Number(info.format && info.format.duration) || 0;
+      const scale = `scale=w='min(${bw},iw)':h='min(${bh},ih)':force_original_aspect_ratio=decrease:flags=lanczos`;
+      let args;
+      if (isPng) args = ['-v', 'error', '-y', '-i', src, '-frames:v', '1', '-vf', scale, tmp];
+      else {
+        const [fn, fd] = String(st.r_frame_rate || '').split('/').map(Number);
+        const fps = fn > 0 && fd > 0 ? fn / fd : 30;
+        args = ['-v', 'error', '-y', '-i', src, '-map', '0:v:0', '-an', '-sn', '-dn', '-vf', `${scale}:force_divisible_by=2,format=yuv420p`,
+          '-fps_mode', 'cfr', '-c:v', 'libx264', '-preset', 'medium', '-crf', '12', '-profile:v', 'high', '-pix_fmt', 'yuv420p',
+          '-bf', '0', '-g', String(Math.max(1, Math.round(fps * 2))), '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', tmp];
+      }
+      await new Promise((resolve, reject) => {
+        const child = this.child = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+        let err = '', buf = '';
+        child.stdout.on('data', d => {
+          buf += d; let i;
+          while ((i = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, i); buf = buf.slice(i + 1);
+            const m = line.match(/^out_time_(?:us|ms)=(\d+)/);
+            if (m && duration) { job.progress = Math.min(99, Math.round(100 * Number(m[1]) / 1e6 / duration)); this._emit(false); }
+          }
+        });
+        child.stderr.on('data', d => { err = (err + d).slice(-2000); });
+        child.on('error', reject);
+        child.on('close', code => (code === 0 ? resolve() : reject(new Error(job.cancelled ? 'cancelled' : (err.trim().split('\n').pop() || `ffmpeg exited with code ${code}`)))));
+      });
+      const out = (await probe(tmp)).streams[0];                              // o tamanho final (par, arredondado) vai no nome
+      const base = path.basename(job.name, path.extname(job.name)).replace(/_resized_\d+x\d+$/, '') || 'file';
+      const final = this.uniqueName(`${base}_resized_${out.width}x${out.height}`, ext);
+      fs.renameSync(tmp, path.join(this.mediaDir, final));
+      job.status = 'done'; job.progress = 100; job.result = final;
+      this.emit('resized', { from: job.srcName, to: final, replace: job.replace, fromWidth: st.width, toWidth: out.width });   // antes de 'jobs': as layers mudam antes de o player retomar
+      this._emit(); this.emit('media', final);
+      setTimeout(() => { this.jobs = this.jobs.filter(x => x !== job); this._emit(); }, 30000).unref();
+    } catch (e) {
+      try { fs.unlinkSync(tmp); } catch {}
+      if (job.cancelled) this.jobs = this.jobs.filter(x => x !== job);
+      else { job.status = 'error'; job.error = e.message; }
+      this._emit();
+    } finally { this.child = null; }
   }
 
   async _convert(job) {
@@ -95,10 +161,11 @@ class Converter extends EventEmitter {
       if (!st) throw new Error('the file has no video');
       const duration = Number(info.format && info.format.duration) || 0;
       const settings = this.getSettings();
+      if (job.size) { settings.maxWidth = job.size[0]; settings.maxHeight = job.size[1]; }   // escolhido no upload
       const ext = path.extname(job.name).toLowerCase();
       if (settings.process === false && COPY_EXT.has(ext) && COPY_CODECS.has(st.codec_name)) {
         const base = path.basename(job.name, ext).replace(/^\.+/, '') || 'video';
-        const final = this.uniqueName(base, ext);                 // guarda o ficheiro tal como foi enviado
+        const final = this.uniqueName(base, ext);      // guarda o ficheiro tal como foi enviado
         fs.renameSync(job.src, path.join(this.mediaDir, final));
         job.status = 'done'; job.progress = 100; job.result = final;
         this._emit(); this.emit('media', final);

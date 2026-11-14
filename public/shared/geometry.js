@@ -5,7 +5,7 @@
  * define a posição e a proporção da layer. O vídeo encaixa na caixa em modo "cover" (enche-a sem deformar).
  * Ordem das transformações: ver docs/MODELO.md
  *   1. vídeo dentro da caixa (cover × videoScale, videoOffsetX/Y)   2. máscara no espaço da layer (maskScale)
- *   3. posição e escala da layer (x,y = centro)                      4. corner pin final (pins[i])
+ *   3. posição, escala e rotação da layer (x,y = centro)             4. corner pin final (pins[i])
  */
 const Geometry = (() => {
   // Homografia que leva o retângulo (0,0,w,h) para o quadrilátero dst (TL, TR, BR, BL).
@@ -51,7 +51,11 @@ const Geometry = (() => {
     const cover = Math.max(vw / vid[0], vh / vid[1]) * c.videoScale;       // "cover": enche a caixa sem deformar
     const vidW = vid[0] * cover, vidH = vid[1] * cover;
     const half = [[-vw / 2, -vh / 2], [vw / 2, -vh / 2], [vw / 2, vh / 2], [-vw / 2, vh / 2]];
-    const base = half.map(([px, py]) => [c.x + px * c.scale, c.y + py * c.scale]);       // sem corner pin
+    const th = (c.rotation || 0) * Math.PI / 180, cos = Math.cos(th), sin = Math.sin(th);   // rotação em torno do centro (graus, sentido horário)
+    const base = half.map(([px, py]) => {                                                  // sem corner pin
+      const sx = px * c.scale, sy = py * c.scale;
+      return [c.x + sx * cos - sy * sin, c.y + sx * sin + sy * cos];
+    });
     const pinned = base.map(([x, y], i) => [x + c.pins[i].x, y + c.pins[i].y]);          // com corner pin
     const m = homography(vw, vh, pinned);
     return {

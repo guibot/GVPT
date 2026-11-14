@@ -1,0 +1,249 @@
+GVPT - G's Video Projection Tool - WINDOWS / MAC / LINUX
+==========================================================
+Vibecoded Video Projection Tool by Guilherme Martins (http://guilhermemartins.net)
+
+Precisas sempre de: Node.js 18+, ffmpeg (com ffprobe) e um browser baseado em
+Chromium (Chrome, Chromium, Edge ou Brave). Os scripts de instalacao tratam de
+tudo e podem ser corridos mais do que uma vez (so instalam o que falta).
+
+Depois de arrancar, o painel abre-se em:
+    No proprio computador:   http://localhost:8080
+    Noutro dispositivo:      http://<ip-do-computador>:8080     (http, nao https)
+O player (output) fica em http://localhost:8080/player/
+
+
+PORTUGUES
+=========
+
+WINDOWS 10/11
+-------------
+1) INSTALAR (so a primeira vez)
+   Duplo clique em:  deploy\win\install.bat
+   Instala Node.js, ffmpeg e Chrome (com o winget), prepara o projeto e
+   pergunta se queres arrancar sozinho ao entrar no Windows.
+   O Windows pede permissao (UAC). Se disser que instalou mas nao encontra,
+   fecha a janela e corre o install.bat outra vez.
+
+2) ARRANCAR
+   Duplo clique em:  deploy\win\start.bat
+   Abre o servidor (numa janela) e o player em ecra inteiro.
+
+3) PARAR
+   deploy\win\stop.bat
+
+4) ARRANQUE AUTOMATICO
+   deploy\win\autostart.bat on        (off para desligar, status para ver)
+
+5) FIREWALL
+   Se o Windows perguntar pelo "node", escolhe Permitir em REDES PRIVADAS.
+   Sem isto, outros dispositivos nao abrem o painel.
+
+6) OPCOES (numa janela cmd, antes de correr o start.bat)
+   set NO_PLAYER=1      so o servidor, sem abrir o browser
+   set PORT=8090        outra porta
+   (o endereco http://<nome>.local nao funciona no Windows: usa o IP)
+
+
+MAC (macOS)
+-----------
+0) PASSO 0 - DESBLOQUEAR OS SCRIPTS (so se o projeto veio por download,
+   AirDrop, email, zip ou pen)
+   O macOS marca esses ficheiros e mostra "nao e possivel verificar o
+   programador" ao abrir um .command. Resolve-se uma vez, no Terminal,
+   na pasta do projeto:
+       cd /caminho/para/GVPT
+       xattr -dr com.apple.quarantine .
+       chmod +x deploy/mac/*.command
+   (o chmod so e preciso se aparecer "permission denied")
+   Em alternativa, botao direito no ficheiro > Abrir > Abrir. Ou corre sempre
+   pelo Terminal (bash deploy/mac/install.command), que nao tem este aviso.
+
+1) INSTALAR (so a primeira vez) - no Terminal:
+       cd /caminho/para/GVPT
+       bash deploy/mac/install.command
+   Instala Homebrew (se faltar), Node.js, ffmpeg, Chrome e as dependencias.
+   Pede a palavra-passe do Mac (nao aparece nada enquanto escreves).
+
+2) ARRANCAR
+       deploy/mac/start.command
+   (ou duplo clique no Finder). Ctrl+C ou fechar a janela pára tudo.
+
+3) ARRANQUE AUTOMATICO
+       deploy/mac/autostart.command on        (off / status)
+
+4) OPCOES
+       NO_PLAYER=1 deploy/mac/start.command       so o servidor
+       PORT=8090 deploy/mac/start.command         outra porta
+       BROWSER_APP="Google Chrome" deploy/mac/start.command
+
+5) SE DER PROBLEMA
+   - "Nao e possivel verificar o programador": na pasta do projeto,
+         xattr -dr com.apple.quarantine .
+   - Outro dispositivo nao abre o painel (mas o ping responde):
+     Definicoes do Sistema > Privacidade e Seguranca > Rede local,
+     e autoriza o browser.
+
+
+LINUX (Debian/Ubuntu, Fedora, Arch)
+-----------------------------------
+1) INSTALAR (so a primeira vez) - no terminal:
+       cd GVPT
+       bash deploy/linux/install.sh
+   Instala Node.js, ffmpeg, Chromium e as dependencias (pede sudo).
+   Se a versao do Node.js for inferior a 18, instala uma mais recente
+   em https://nodejs.org
+
+2) ARRANCAR
+       deploy/linux/start.sh
+   Ctrl+C ou fechar o terminal pára tudo.
+
+3) OPCOES
+       NO_PLAYER=1 deploy/linux/start.sh          so o servidor
+       PORT=8090 deploy/linux/start.sh            outra porta
+       BROWSER_BIN=google-chrome deploy/linux/start.sh
+
+4) RASPBERRY PI (servico que arranca com o Pi)
+       sudo apt update && sudo apt install -y nodejs npm ffmpeg chromium curl avahi-daemon
+       cd GVPT/server && npm install --omit=dev
+       cd .. && deploy/install-service.sh
+       ./kiosk on        (opcional: abre o player em ecra inteiro ao arrancar)
+   Tecla F9 (parar/retomar os videos): ver o README.md, secao "F9 shortcut".
+
+
+EM TODOS OS SISTEMAS
+--------------------
+- RUN / EDIT (barra de cima): RUN so observa; EDIT permite editar. O EDIT desliga
+  sozinho apos 5 minutos sem atividade. Arranca sempre em RUN.
+- Por omissao NAO ha PIN: qualquer pessoa na rede controla o ecra.
+  Define um em Settings.
+- Esqueci-me do PIN: pára o servidor, poe "pinHash": "" em data/config.json e
+  arranca outra vez.
+- Os teus dados ficam em data/ (config.json e media/). Copia de seguranca:
+      tar czf ~/gvpi-backup-$(date +%F).tar.gz data/config.json data/media
+  (no Windows, copia a pasta data)
+- Depois de atualizar o projeto, reinicia sempre o servidor.
+- "ffmpeg nao encontrado" no terminal: corre o install do teu sistema outra vez.
+- A RAM aparece como "-" no Debug: reinicia o servidor.
+
+
+ENGLISH
+=======
+
+You always need: Node.js 18+, ffmpeg (with ffprobe) and a Chromium-based browser
+(Chrome, Chromium, Edge or Brave). The install scripts set everything up and can
+be run more than once (they only install what is missing).
+
+After starting, open the panel at:
+    On the same computer:    http://localhost:8080
+    On another device:       http://<computer-ip>:8080     (http, not https)
+The player (output) is at http://localhost:8080/player/
+
+
+WINDOWS 10/11
+-------------
+1) INSTALL (first time only)
+   Double-click:  deploy\win\install.bat
+   Installs Node.js, ffmpeg and Chrome (via winget), prepares the project and
+   asks whether to start automatically when you log in.
+   Windows asks for permission (UAC). If it says it installed something but
+   cannot find it, close the window and run install.bat again.
+
+2) START
+   Double-click:  deploy\win\start.bat
+   Opens the server (in a window) and the player fullscreen.
+
+3) STOP
+   deploy\win\stop.bat
+
+4) AUTO-START
+   deploy\win\autostart.bat on        (off to disable, status to check)
+
+5) FIREWALL
+   If Windows asks about "node", choose Allow on PRIVATE NETWORKS.
+   Without it, other devices cannot open the panel.
+
+6) OPTIONS (in a cmd window, before running start.bat)
+   set NO_PLAYER=1      server only, no browser
+   set PORT=8090        another port
+   (http://<name>.local does not work on Windows: use the IP)
+
+
+MAC (macOS)
+-----------
+0) STEP 0 - UNBLOCK THE SCRIPTS (only if the project came by download,
+   AirDrop, email, zip or USB stick)
+   macOS marks those files and shows "cannot verify the developer" when you
+   open a .command. Fix it once, in Terminal, in the project folder:
+       cd /caminho/para/GVPT
+       xattr -dr com.apple.quarantine .
+       chmod +x deploy/mac/*.command
+   (chmod is only needed if you see "permission denied")
+   Alternatively, right-click the file > Open > Open. Or always run through
+   Terminal (bash deploy/mac/install.command), which does not show this warning.
+
+1) INSTALL (first time only) - in Terminal:
+       cd /caminho/para/GVPT
+       bash deploy/mac/install.command
+   Installs Homebrew (if missing), Node.js, ffmpeg, Chrome and the dependencies.
+   Asks for your Mac password (nothing shows while you type).
+
+2) START
+       deploy/mac/start.command
+   (or double-click in Finder). Ctrl+C or closing the window stops everything.
+
+3) AUTO-START
+       deploy/mac/autostart.command on        (off / status)
+
+4) OPTIONS
+       NO_PLAYER=1 deploy/mac/start.command       server only
+       PORT=8090 deploy/mac/start.command         another port
+       BROWSER_APP="Google Chrome" deploy/mac/start.command
+
+5) IF SOMETHING GOES WRONG
+   - "Cannot verify the developer": in the project folder run
+         xattr -dr com.apple.quarantine .
+   - Another device cannot open the panel (but ping works):
+     System Settings > Privacy & Security > Local Network,
+     and allow your browser.
+
+
+LINUX (Debian/Ubuntu, Fedora, Arch)
+-----------------------------------
+1) INSTALL (first time only) - in a terminal:
+       cd GVPT
+       bash deploy/linux/install.sh
+   Installs Node.js, ffmpeg, Chromium and the dependencies (asks for sudo).
+   If the Node.js version is older than 18, install a newer one from
+   https://nodejs.org
+
+2) START
+       deploy/linux/start.sh
+   Ctrl+C or closing the terminal stops everything.
+
+3) OPTIONS
+       NO_PLAYER=1 deploy/linux/start.sh          server only
+       PORT=8090 deploy/linux/start.sh            another port
+       BROWSER_BIN=google-chrome deploy/linux/start.sh
+
+4) RASPBERRY PI (service that starts with the Pi)
+       sudo apt update && sudo apt install -y nodejs npm ffmpeg chromium curl avahi-daemon
+       cd GVPT/server && npm install --omit=dev
+       cd .. && deploy/install-service.sh
+       ./kiosk on        (optional: opens the player fullscreen at boot)
+   F9 key (stop/resume the videos): see README.md, section "F9 shortcut".
+
+
+ON ALL SYSTEMS
+--------------
+- RUN / EDIT (top bar): RUN only watches; EDIT lets you change things. EDIT turns
+  itself off after 5 minutes without activity. It always starts in RUN.
+- There is NO PIN by default: anyone on your network can control the screen.
+  Set one in Settings.
+- Forgot the PIN: stop the server, set "pinHash": "" in data/config.json and
+  start again.
+- Your data lives in data/ (config.json and media/). Backup:
+      tar czf ~/gvpi-backup-$(date +%F).tar.gz data/config.json data/media
+  (on Windows, copy the data folder)
+- After updating the project, always restart the server.
+- "ffmpeg not found" in the terminal: run your system's install script again.
+- RAM shows "-" in Debug: restart the server.

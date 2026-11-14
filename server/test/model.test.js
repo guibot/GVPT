@@ -165,3 +165,26 @@ test('máscara desenhada: duplicar copia o desenho', () => {
   c = applyOp(c, { op: 'duplicateLayer', id: 'a' });
   assert.deepEqual(c.layers[1].vmask, c.layers[0].vmask);
 });
+
+test('rotation e locked: defaults, limites e duplicar dá cópia desbloqueada', () => {
+  const { normalize, applyOp } = require('../lib/model');
+  let c = applyOp(normalize({}), { op: 'addLayer', layer: { rotation: 999, locked: true } });
+  assert.equal(c.layers[0].rotation, 360);
+  assert.equal(c.layers[0].locked, true);
+  c = applyOp(c, { op: 'updateLayer', id: c.layers[0].id, patch: { rotation: -12.5 } });
+  assert.equal(c.layers[0].rotation, -12.5);
+  c = applyOp(c, { op: 'duplicateLayer', id: c.layers[0].id });
+  assert.equal(c.layers[1].locked, false);
+  assert.equal(normalize({ layers: [{}] }).layers[0].rotation, 0);
+});
+
+test('conversão: qualquer tamanho inteiro de 64 a 4096; splash ligado por defeito', () => {
+  const { normalize, applyOp, validConvertSize } = require('../lib/model');
+  assert.ok(validConvertSize(360, 640) && validConvertSize(4096, 64));
+  assert.ok(!validConvertSize(63, 640) && !validConvertSize(640, 4097) && !validConvertSize(640.5, 360));
+  let c = applyOp(normalize({}), { op: 'setConvert', width: 360, height: 640, fps: 25, process: true });
+  assert.deepEqual([c.convert.maxWidth, c.convert.maxHeight], [360, 640]);
+  assert.throws(() => applyOp(c, { op: 'setConvert', width: 10, height: 640, fps: 25 }));
+  assert.equal(c.splash, true);
+  assert.equal(applyOp(c, { op: 'setSplash', enabled: false }).splash, false);
+});

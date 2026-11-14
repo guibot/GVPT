@@ -56,10 +56,14 @@ header { display: flex; align-items: center; gap: 10px; padding: 0 12px; height:
 .version { font: 11px var(--mono); color: var(--text3); }
 .version:not(:empty)::after { content: " -"; }
 .status.on i { background: var(--green); } .status.off i { background: var(--danger); }
-main { flex: 1; min-height: 0; display: grid; grid-template-columns: 236px minmax(0, 1fr) 320px; }
+/* Desktop: layers | propriedades | pré-visualização (as propriedades ficam ao lado das layers). */
+main { flex: 1; min-height: 0; display: grid; grid-template-columns: 236px 320px minmax(0, 1fr); }
+#col-layers { grid-column: 1; grid-row: 1; }
+#col-props { grid-column: 2; grid-row: 1; }
+#col-preview { grid-column: 3; grid-row: 1; }
 main > section { overflow: auto; min-height: 0; padding: 12px; }
 #col-layers { border-right: 1px solid var(--border); background: var(--surface); }
-#col-props { border-left: 1px solid var(--border); background: var(--surface); padding-top: 4px; }
+#col-props { border-right: 1px solid var(--border); background: var(--surface); padding-top: 4px; }
 #col-preview { display: flex; flex-direction: column; padding: 16px; }
 .bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .bar h2, .gt { font: 600 10px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--text3); }
@@ -235,4 +239,70 @@ ul.plain { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6p
   #preview-wrap { display: flex; flex: 1; min-height: 120px; }
   #tabs { grid-column: 2; grid-row: 1; }
   #col-layers, #col-props { grid-column: 2; grid-row: 2; padding-right: max(12px, env(safe-area-inset-right)); }
+}
+
+/* ---------- avisos (também dentro de diálogos abertos) ---------- */
+#toast.info { color: var(--text); border-color: var(--accent); }
+dialog #toast { z-index: 10; }
+
+/* ---------- biblioteca: seleção, "in use", sugestões ---------- */
+.mrow.lib { grid-template-columns: 22px 48px 1fr auto; }
+.mrow.lib input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.mrow.lib.picked { border-color: var(--accent); }
+.lib-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 8px; }
+.lib-bar .field.check { font-size: 12px; }
+.lib-actions { display: flex; gap: 6px; }
+.mrow .fits { display: grid; gap: 4px; margin-top: 4px; }
+.mrow .fit { font: 11px var(--mono); color: var(--text3); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mrow .fit button { padding: 0 8px; height: 22px; font-size: 11px; color: var(--accent); border-color: var(--accent); }
+.mrow .uses { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 4px; }
+.mrow .uses b { font: 600 9px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--green); }
+.mrow .use { padding: 1px 7px; border-radius: 10px; border: 1px solid var(--green); background: rgba(154, 209, 171, .14); color: var(--green); font: 600 11px var(--mono); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#resize-dlg ul.plain li { display: flex; justify-content: space-between; gap: 10px; font: 12px var(--mono); padding: 4px 0; border-bottom: 1px solid var(--border); }
+#resize-dlg ul.plain li .res { color: var(--green); white-space: nowrap; }
+#resize-dlg ul.plain li .res.skip { color: var(--text3); }
+#resize-dlg .field { margin-top: 10px; }
+#conv-custom { margin: 6px 0; align-items: start; }
+#settings .g2 { align-items: start; margin-bottom: 8px; }
+
+/* ---------- Layer Transform: tamanho atual no título ---------- */
+.gt-size { margin-left: 10px; color: var(--accent); letter-spacing: .04em; text-transform: none; font-weight: 500; }
+
+/* ---------- layer bloqueada ---------- */
+.li-lock { background: none; border: 0; color: var(--text3); padding: 0 6px; height: 28px; display: grid; place-items: center; cursor: pointer; }
+.li-lock.on { color: var(--orange); }
+.li.locked .li-name { color: var(--text2); }
+
+/* ---------- player ligado/desligado ---------- */
+button.ghost.danger-ghost { color: var(--danger); }
+button.ghost.danger-ghost:hover { background: rgba(232, 154, 154, .12); }
+
+/* ---------- RUN / EDIT ---------- */
+#runedit { margin-left: 10px; flex: none; }
+#runedit button { min-width: 72px; padding: 0 18px; }
+#runedit button.on { background: var(--accent-dim); color: var(--accent); }
+body.editing #runedit button.on { background: rgba(233, 185, 143, .16); color: var(--orange); }
+.edit-note { font: 11px var(--mono); color: var(--orange); letter-spacing: .03em; margin-bottom: 8px; }
+#monitor { display: none; font: 12px/1.7 var(--mono); color: var(--text2); padding: 10px 2px 0; }
+#monitor b { color: var(--green); font-weight: 600; }
+#monitor .off { color: var(--text3); }
+/* RUN: só se observa o output. Sem layers nem propriedades; a pré-visualização ocupa tudo. */
+body:not(.editing) #col-layers, body:not(.editing) #col-props, body:not(.editing) #tabs { display: none !important; }
+body:not(.editing) main { grid-template-columns: minmax(0, 1fr); }
+body:not(.editing) #col-preview { grid-column: 1; }
+body:not(.editing) #monitor { display: block; }
+body:not(.editing) #mask-tools { display: none; }
+body:not(.editing) .handle, body:not(.editing) #overlay { display: none !important; }
+body:not(.editing) #preview { cursor: default; }
+@media (max-width: 800px) { #runedit { margin-left: 4px; } #runedit button { min-width: 0; padding: 0 10px; } }
+
+/* ---------- cabeçalho em ecrãs estreitos: tudo cabe numa linha ---------- */
+header button { white-space: nowrap; }
+@media (max-width: 560px) {
+  header .logo { display: none; }
+  header { gap: 0; }
+  header button.ghost { padding: 0 6px; font-size: 11px; }
+  #runedit { margin-left: 2px; }
+  #runedit button { padding: 0 8px; min-width: 0; font-size: 10px; }
+  #btn-player { max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
 }
