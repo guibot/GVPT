@@ -143,3 +143,7 @@ Cada layer tem `speed` (0.1–4, 1 = normal) e um objeto `fx`:
 - **FX**: filtros CSS, `opacity` e `mix-blend-mode` no elemento da layer. Aplicam-se antes da máscara (um blur fica recortado por ela) e
   antes da transformação final. Em tempo real, sem reconverter vídeos. `fx.on = false` ignora os efeitos sem perder os valores.
 - A pré-visualização do painel aplica os mesmos efeitos às miniaturas (a velocidade só se vê no player).
+
+## Espelho
+
+`mirrorX` e `mirrorY` (booleanos) viram a layer, máscara incluída, dentro do quadrilátero final: trocam-se os cantos de destino da homografia, por isso o corner pin e as pegas não se mexem.

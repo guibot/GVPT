@@ -118,6 +118,8 @@ function normalizeLayer(l, output) {
     x: num(l.x, output.width / 2, LIMITS.x),         // centro da layer, em píxeis de saída
     y: num(l.y, output.height / 2, LIMITS.y),
     scale: num(l.scale, 1, LIMITS.scale),
+    mirrorX: l.mirrorX === true,                     // espelho horizontal / vertical (vira a layer dentro do quadrilátero final)
+    mirrorY: l.mirrorY === true,
     rotation: num(l.rotation, 0, LIMITS.rotation),   // em torno do centro, graus, sentido horário
     pins: [0, 1, 2, 3].map(i => ({                    // TL, TR, BR, BL
       x: num(pins[i] && pins[i].x, 0, LIMITS.pin),
@@ -181,7 +183,7 @@ const findIndex = (c, id) => {
 };
 // Campos que o painel pode alterar (o id nunca muda).
 const PATCHABLE = ['name', 'visible', 'locked', 'video', 'mask', 'vmask', 'maskScale', 'maskMode', 'videoScale', 'videoOffsetX',
-  'videoOffsetY', 'x', 'y', 'scale', 'rotation', 'pins', 'speed', 'fx'];
+  'videoOffsetY', 'x', 'y', 'scale', 'rotation', 'pins', 'speed', 'fx', 'mirrorX', 'mirrorY'];
 
 // Aplica uma operação e devolve uma configuração nova (a original não é alterada).
 function applyOp(config, op) {

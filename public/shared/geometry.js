@@ -6,6 +6,7 @@
  * Ordem das transformações: ver docs/MODELO.md
  *   1. vídeo dentro da caixa (cover × videoScale, videoOffsetX/Y)   2. máscara no espaço da layer (maskScale)
  *   3. posição, escala e rotação da layer (x,y = centro)             4. corner pin final (pins[i])
+ *   5. espelho X/Y (mirrorX, mirrorY): vira o resultado dentro do quadrilátero final
  */
 const Geometry = (() => {
   // Homografia que leva o retângulo (0,0,w,h) para o quadrilátero dst (TL, TR, BR, BL).
@@ -57,7 +58,11 @@ const Geometry = (() => {
       return [c.x + sx * cos - sy * sin, c.y + sx * sin + sy * cos];
     });
     const pinned = base.map(([x, y], i) => [x + c.pins[i].x, y + c.pins[i].y]);          // com corner pin
-    const m = homography(vw, vh, pinned);
+    // Espelho: o conteúdo da caixa vira-se dentro do quadrilátero (os cantos e as pegas do corner pin ficam onde estão).
+    // Basta trocar os cantos de destino: X troca esquerda/direita, Y troca cima/baixo.
+    const P = pinned;
+    const dst = c.mirrorX && c.mirrorY ? [P[2], P[3], P[0], P[1]] : c.mirrorX ? [P[1], P[0], P[3], P[2]] : c.mirrorY ? [P[3], P[2], P[1], P[0]] : P;
+    const m = homography(vw, vh, dst);
     return {
       box: { width: vw, height: vh },
       video: { width: vidW, height: vidH, left: (vw - vidW) / 2 + c.videoOffsetX, top: (vh - vidH) / 2 + c.videoOffsetY },

@@ -279,6 +279,13 @@
     return el;
   }
 
+  // Botão ligar/desligar.
+  function toggle(label, get, set) {
+    const b = h('button', { type: 'button', class: 'tog', text: label, onclick: () => set(!get()) });
+    selects.push(() => { const on = get(); b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+    return b;
+  }
+
   // Controlo segmentado (2 ou mais opções).
   function seg(options, get, set) {
     const btns = options.map(([val, text]) => h('button', { type: 'button', text, onclick: () => set(val) }));
@@ -287,36 +294,64 @@
     return el;
   }
 
-  function mediaSelect(label, key, kind) {
-    const sl = h('select', { 'aria-label': label });
-    const fill = () => {
-      const l = layerById(sel); const cur = l ? l[key] : null;
-      sl.textContent = '';
-      sl.append(h('option', { value: '', text: '— none —' }));
-      const items = media.filter(m => m.kind === kind);
-      if (cur && !items.some(m => m.name === cur)) sl.append(h('option', { value: cur, text: `(missing) ${cur}` }));
-      for (const m of items) sl.append(h('option', { value: m.name, text: m.width ? `${m.name}  (${m.width}×${m.height})` : m.name }));
-      sl.value = cur || '';
-    };
-    fill();
-    sl.addEventListener('change', () => {
-      const l = layerById(sel), p = { [key]: sl.value || null };
-      // Sem máscara a caixa da layer é o próprio vídeo: trocar por um de outro tamanho (ex.: um _resized_) encolheria a layer no ecrã.
-      // Compensa o scale e o offset do vídeo na proporção inversa para a layer ficar com o mesmo tamanho visual.
-      if (key === 'video' && l && !l.mask && !l.vmask) {
-        const o = mediaByName(l.video), n = mediaByName(sl.value);
-        if (o && n && o.width && n.width && o.width !== n.width) {
-          const k = o.width / n.width;
-          p.scale = +Math.min(LIM.scale[1], Math.max(LIM.scale[0], l.scale * k)).toFixed(4);
-          p.videoOffsetX = +Math.min(5000, Math.max(-5000, l.videoOffsetX / k)).toFixed(2);
-          p.videoOffsetY = +Math.min(5000, Math.max(-5000, l.videoOffsetY / k)).toFixed(2);
-        }
+  // Escolhe o ficheiro de uma layer (vídeo ou máscara).
+  function pickMedia(key, value) {
+    const l = layerById(sel), p = { [key]: value || null };
+    // Sem máscara a caixa da layer é o próprio vídeo: trocar por um de outro tamanho (ex.: um _resized_) encolheria a layer no ecrã.
+    // Compensa o scale e o offset do vídeo na proporção inversa para a layer ficar com o mesmo tamanho visual.
+    if (key === 'video' && l && !l.mask && !l.vmask) {
+      const o = mediaByName(l.video), n = mediaByName(value);
+      if (o && n && o.width && n.width && o.width !== n.width) {
+        const k = o.width / n.width;
+        p.scale = +Math.min(LIM.scale[1], Math.max(LIM.scale[0], l.scale * k)).toFixed(4);
+        p.videoOffsetX = +Math.min(5000, Math.max(-5000, l.videoOffsetX / k)).toFixed(2);
+        p.videoOffsetY = +Math.min(5000, Math.max(-5000, l.videoOffsetY / k)).toFixed(2);
       }
-      patchLayer(sel, p);
-    });
-    sl.addEventListener('focus', refreshMedia);
-    selects.push(() => { if (document.activeElement !== sl) fill(); });
-    return h('label', { class: 'field' }, label, sl);
+    }
+    patchLayer(sel, p);
+  }
+
+  const mediaSelect = (label, key, kind) => mediaPicker(label, key, kind);
+
+  let pickerOpen = null;           // a lista de vídeos está aberta (sobrevive a reconstruir o painel, ex.: chega a lista de media)
+  // Lista de vídeos ou máscaras com miniatura antes do nome (um <select> nativo não mostra imagens).
+  function mediaPicker(label, key, kind) {
+    const btn = h('button', { type: 'button', class: 'pick', 'aria-haspopup': 'listbox', 'aria-expanded': 'false', 'aria-label': label });
+    const list = h('ul', { class: 'pick-list', role: 'listbox', hidden: true });
+    const wrap = h('div', { class: 'pick-wrap' }, btn, list);
+    const thumb = m => kind === 'mask'
+      ? h('span', { class: 'pick-thumb mk' }, m ? maskPreview(m.name) : null)           // máscara: forma branca sobre preto
+      : h('span', { class: 'pick-thumb', style: m ? `background-image:url("${thumbUrl(m)}")` : '' });
+    const cell = (m, name, sub) => [thumb(m), h('span', { class: 'pick-name', text: name }), sub ? h('span', { class: 'pick-sub', text: sub }) : null];
+    const close = () => { if (pickerOpen === key) pickerOpen = null; list.hidden = true; btn.setAttribute('aria-expanded', 'false'); document.removeEventListener('pointerdown', outside, true); };
+    const outside = e => { if (!wrap.contains(e.target)) close(); };
+    const open = () => {
+      pickerOpen = key; refreshMedia(); fillList();
+      list.hidden = false; btn.setAttribute('aria-expanded', 'true');
+      document.addEventListener('pointerdown', outside, true);
+      const on = list.querySelector('.on'); if (on) on.scrollIntoView({ block: 'nearest' });
+    };
+    const fillBtn = () => {
+      const l = layerById(sel), cur = l ? l[key] : null, m = cur ? mediaByName(cur) : null;
+      btn.textContent = '';
+      btn.append(...(cur ? cell(m, m ? cur : `(missing) ${cur}`) : [thumb(null), h('span', { class: 'pick-name dim', text: '— none —' })]).filter(Boolean), h('span', { class: 'pick-caret', text: '⌄' }));
+    };
+    const fillList = () => {
+      const l = layerById(sel), cur = l ? l[key] : null;
+      list.textContent = '';
+      const add = (value, kids) => list.append(h('li', { role: 'option', 'aria-selected': (cur || '') === value },
+        h('button', { type: 'button', class: (cur || '') === value ? 'on' : '', onclick: () => { close(); if ((cur || '') !== value) pickMedia(key, value); btn.focus(); } }, ...kids)));
+      add('', [thumb(null), h('span', { class: 'pick-name dim', text: '— none —' })]);
+      const items = media.filter(m => m.kind === kind);
+      if (cur && !items.some(m => m.name === cur)) add(cur, cell(null, `(missing) ${cur}`));
+      for (const m of items) add(m.name, cell(m, m.name, m.width ? `${m.width}×${m.height}` : ''));
+    };
+    btn.addEventListener('click', () => (list.hidden ? open() : close()));
+    wrap.addEventListener('keydown', e => { if (e.key === 'Escape' && !list.hidden) { e.stopPropagation(); close(); btn.focus(); } });
+    fillBtn();
+    selects.push(() => { fillBtn(); if (!list.hidden) fillList(); });
+    if (pickerOpen === key) setTimeout(open, 0);       // o painel foi reconstruído com a lista aberta: reabre
+    return h('div', { class: 'field pk' }, label, wrap);
   }
 
   function buildProps() {
@@ -352,8 +387,9 @@
       group(transformTitle,
         g2(numRow('X', [0, W], LIM.xy, 1, () => L().x, v => patch({ x: v })),
            numRow('Y', [0, H], LIM.xy, 1, () => L().y, v => patch({ y: v }))),
-        numRow('Scale', [0.1, 5], LIM.scale, 0.01, () => L().scale, v => patch({ scale: v })),
-        numRow('Rotate', [-180, 180], LIM.rotation, 0.1, () => L().rotation || 0, v => patch({ rotation: v }))),
+        numRow('Scale', [0, 1.5], LIM.scale, 0.01, () => L().scale, v => patch({ scale: v })),   // 1 fica a 2/3 da barra
+        numRow('Rotate', [-180, 180], LIM.rotation, 0.1, () => L().rotation || 0, v => patch({ rotation: v })),
+        g2(toggle('X Mirror', () => !!L().mirrorX, v => patch({ mirrorX: v })), toggle('Y Mirror', () => !!L().mirrorY, v => patch({ mirrorY: v })))),
       group('Mask',
         modeSeg,
         h('div', { class: 'row-btns tight' },
@@ -404,7 +440,7 @@
       group('Blur & mix',
         fxRow('Blur', 'blur', [0, 40], 0.5),
         fxRow('Opacity', 'opacity', [0, 100], 1),
-        h('label', { class: 'field' }, 'BLEND', blend)),
+        h('div', { class: 'nf sel' }, h('span', { class: 'lb', text: 'Blend' }), blend)),
       h('div', { class: 'row-btns' }, bypass, reset));
   }
 

@@ -57,7 +57,7 @@ header { display: flex; align-items: center; gap: 10px; padding: 0 12px; height:
 .version:not(:empty)::after { content: " -"; }
 .status.on i { background: var(--green); } .status.off i { background: var(--danger); }
 /* Desktop: layers | propriedades | pré-visualização (as propriedades ficam ao lado das layers). */
-main { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--w-layers, 236px) var(--w-props, 320px) var(--w-fx, 280px) minmax(0, 1fr); }
+main { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--w-layers, 296px) var(--w-props, 320px) var(--w-fx, 280px) minmax(0, 1fr); }
 #col-layers { grid-column: 1; grid-row: 1; }
 #col-props { grid-column: 2; grid-row: 1; }
 #col-fx { grid-column: 3; grid-row: 1; }
@@ -84,8 +84,8 @@ main > section { overflow: auto; min-height: 0; padding: 12px; }
 .drop-line { position: absolute; left: 0; right: 0; height: 3px; margin-top: -2px; border-radius: 2px; background: var(--accent); pointer-events: none; z-index: 6; }
 .li-thumb { width: 48px; aspect-ratio: 16 / 10; border-radius: 5px; background: #000 center / cover; flex: none; border: 1px solid var(--border); }
 .li-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.li-mask, .mrow .thumb.mk { position: relative; background: #000; }
-.li-mask > i, .mrow .thumb.mk > i { position: absolute; inset: 2px; background: #fff; -webkit-mask: center / contain no-repeat; mask: center / contain no-repeat; }
+.li-mask, .mrow .thumb.mk, .pick-thumb.mk { position: relative; background: #000; }
+.li-mask > i, .mrow .thumb.mk > i, .pick-thumb.mk > i { position: absolute; inset: 2px; background: #fff; -webkit-mask: center / contain no-repeat; mask: center / contain no-repeat; }
 .li-mask { width: 28px; height: 28px; border-radius: 5px; flex: none; border: 1px solid var(--border); }
 .li.hidden-layer .li-name, .li.hidden-layer .li-thumb, .li.hidden-layer .li-mask { opacity: .4; }
 .li-eye { width: var(--h); padding: 0; border-color: transparent; font: 14px var(--mono); color: var(--accent); }
@@ -315,7 +315,13 @@ header button { white-space: nowrap; }
 
 /* ---------- coluna FX, badge na lista, colunas recolhíveis ---------- */
 .li-fx { flex: none; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--accent); color: var(--accent); background: var(--accent-dim); font: 600 10px var(--mono); }
-#fx select { height: var(--h); }
+/* Blend: mesmo aspeto das barras dos outros controlos (etiqueta à esquerda, valor à direita), mas é uma lista */
+.nf.sel { cursor: default; padding-right: 4px; }
+.nf.sel select { position: relative; width: auto; max-width: 62%; height: 100%; padding: 0 6px; border: 0; background: transparent; color: var(--text);
+  font: 12px var(--mono); text-align: right; text-align-last: right; cursor: pointer; }
+.nf.sel select:focus { outline: 0; }
+.nf.sel:focus-within { border-color: var(--accent); }
+.nf.sel select option { background: var(--surface2); color: var(--text); }
 .row-btns button.on { color: var(--orange); border-color: var(--orange); }
 .col-head { display: flex; align-items: center; justify-content: space-between; margin: -4px 0 6px; }
 .col-toggle { width: 28px; height: 28px; padding: 0; font: 15px var(--mono); color: var(--text3); }
@@ -331,3 +337,27 @@ header button { white-space: nowrap; }
 }
 #col-layers .bar h2 { display: none; }
 #col-layers .bar { justify-content: flex-end; }
+
+/* botões ligar/desligar (ex.: X Mirror, Y Mirror) */
+button.tog { font: 12px var(--mono); color: var(--text2); background: var(--surface2); border-color: var(--border); }
+button.tog.on { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+
+/* ---------- escolha de vídeo com miniatura ---------- */
+.pick-wrap { position: relative; }
+button.pick { width: 100%; height: calc(var(--h) + 6px); padding: 0 8px; justify-content: flex-start; gap: 8px; background: var(--surface2); border-color: var(--border); text-align: left; }
+button.pick:hover { border-color: var(--border2); }
+button.pick[aria-expanded="true"] { border-color: var(--accent); }
+.pick-thumb { flex: none; width: 40px; aspect-ratio: 16 / 10; border-radius: 4px; background: #000 center / cover no-repeat; border: 1px solid var(--border); }
+.pick-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); color: var(--text); }
+.pick-name.dim { color: var(--text3); }
+.pick-sub { flex: none; font: 11px var(--mono); color: var(--text3); }
+.pick-caret { flex: none; color: var(--text3); }
+.pick-list { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30; margin: 0; padding: 4px; list-style: none; max-height: 300px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border2); border-radius: 9px; box-shadow: 0 8px 24px #000a; }
+.pick-list button { width: 100%; height: auto; min-height: 40px; padding: 4px 6px; justify-content: flex-start; gap: 8px; border: 0; border-radius: 6px; text-align: left; }
+.pick-list button:hover { background: var(--accent-dim); }
+.pick-list button.on { background: var(--accent-dim); }
+.pick-list button.on .pick-name { color: var(--accent); }
+.field.pk { grid-template-columns: minmax(0, 1fr); }
+.pick-wrap, button.pick { min-width: 0; }
+button.pick { overflow: hidden; }

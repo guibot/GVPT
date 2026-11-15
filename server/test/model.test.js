@@ -206,3 +206,11 @@ test('updateLayer aceita speed e fx e a cópia herda-os', () => {
   c = applyOp(c, { op: 'duplicateLayer', id });
   assert.equal(c.layers[1].speed, 0.5); assert.equal(c.layers[1].fx.blend, 'screen');
 });
+
+test('mirrorX/mirrorY: false por defeito, só true estrito liga', () => {
+  let c = applyOp(base(), { op: 'addLayer' });
+  assert.equal(c.layers[0].mirrorX, false); assert.equal(c.layers[0].mirrorY, false);
+  assert.equal(normalize({ layers: [{ id: 'a', mirrorX: 1 }] }).layers[0].mirrorX, false);
+  c = applyOp(c, { op: 'updateLayer', id: c.layers[0].id, patch: { mirrorX: true } });
+  assert.equal(c.layers[0].mirrorX, true); assert.equal(c.layers[0].mirrorY, false);
+});
