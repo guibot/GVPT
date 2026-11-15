@@ -132,3 +132,14 @@ Operações inválidas lançam `OpError` e não alteram nada.
 - **Player ligado/desligado**: `POST /api/player` com `{"on": true|false}` ou `{"toggle": true}`; o servidor emite `{type:'player', on}`. Desligado = os vídeos param.
 - **Re-conversão**: `POST /api/media/:name/resize` com `{width, height, replace?}` cria `nome_resized_LxA.ext`. Com `replace: true` as layers que usavam o original passam à cópia,
   compensando `scale` e `videoOffsetX/Y` (só em layers sem máscara) para manterem o mesmo tamanho no ecrã.
+
+## Velocidade e efeitos (FX) por layer
+
+Cada layer tem `speed` (0.1–4, 1 = normal) e um objeto `fx`:
+`on` (bypass), `brightness`, `contrast`, `saturate` (%, 100 = normal), `hue` (graus), `invert`, `grayscale`, `sepia` (%),
+`blur` (px), `opacity` (%) e `blend` (modo de mistura CSS). Limites em `FX_LIMITS` (`server/lib/model.js`) e `public/shared/fx.js`.
+
+- **Speed**: `playbackRate` dos dois `<video>` da layer. A antecedência com que o vídeo seguinte arranca no loop sem salto acompanha a velocidade.
+- **FX**: filtros CSS, `opacity` e `mix-blend-mode` no elemento da layer. Aplicam-se antes da máscara (um blur fica recortado por ela) e
+  antes da transformação final. Em tempo real, sem reconverter vídeos. `fx.on = false` ignora os efeitos sem perder os valores.
+- A pré-visualização do painel aplica os mesmos efeitos às miniaturas (a velocidade só se vê no player).

@@ -57,13 +57,14 @@ header { display: flex; align-items: center; gap: 10px; padding: 0 12px; height:
 .version:not(:empty)::after { content: " -"; }
 .status.on i { background: var(--green); } .status.off i { background: var(--danger); }
 /* Desktop: layers | propriedades | pré-visualização (as propriedades ficam ao lado das layers). */
-main { flex: 1; min-height: 0; display: grid; grid-template-columns: 236px 320px minmax(0, 1fr); }
+main { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--w-layers, 236px) var(--w-props, 320px) var(--w-fx, 280px) minmax(0, 1fr); }
 #col-layers { grid-column: 1; grid-row: 1; }
 #col-props { grid-column: 2; grid-row: 1; }
-#col-preview { grid-column: 3; grid-row: 1; }
+#col-fx { grid-column: 3; grid-row: 1; }
+#col-preview { grid-column: 4; grid-row: 1; }
 main > section { overflow: auto; min-height: 0; padding: 12px; }
 #col-layers { border-right: 1px solid var(--border); background: var(--surface); }
-#col-props { border-right: 1px solid var(--border); background: var(--surface); padding-top: 4px; }
+#col-props, #col-fx { border-right: 1px solid var(--border); background: var(--surface); padding-top: 4px; }
 #col-preview { display: flex; flex-direction: column; padding: 16px; }
 .bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .bar h2, .gt { font: 600 10px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--text3); }
@@ -217,13 +218,13 @@ ul.plain { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6p
   #col-preview { order: -1; flex: none; padding: 8px 12px 8px; overflow: visible; }
   #preview-wrap { display: block; flex: none; }
   #preview { margin: 0 auto; }
-  #tabs { order: 0; flex: none; display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); background: var(--surface); }
+  #tabs { order: 0; flex: none; display: grid; grid-template-columns: 1fr 1fr 1fr; border-bottom: 1px solid var(--border); background: var(--surface); }
   #tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; font: 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--text3); }
   #tabs button.on { color: var(--accent); border-bottom-color: var(--accent); }
-  #col-layers, #col-props { order: 1; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
-  body[data-tab="layers"] #col-props { display: none; }
-  body[data-tab="props"] #col-layers { display: none; }
-  #col-props { padding-top: 0; }
+  #col-layers, #col-props, #col-fx { order: 1; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  body:not([data-tab="layers"]) #col-layers, body:not([data-tab="props"]) #col-props, body:not([data-tab="fx"]) #col-fx { display: none; }
+  #col-props, #col-fx { padding-top: 0; }
+  .col-head { display: none !important; }
   #col-layers .bar h2 { visibility: hidden; }     /* o separador já diz "Layers" */
   .li-thumb { width: 56px; }
   /* editor de máscaras compacto: menos altura roubada ao painel */
@@ -238,7 +239,7 @@ ul.plain { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6p
     padding-left: max(12px, env(safe-area-inset-left)); padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
   #preview-wrap { display: flex; flex: 1; min-height: 120px; }
   #tabs { grid-column: 2; grid-row: 1; }
-  #col-layers, #col-props { grid-column: 2; grid-row: 2; padding-right: max(12px, env(safe-area-inset-right)); }
+  #col-layers, #col-props, #col-fx { grid-column: 2; grid-row: 2; padding-right: max(12px, env(safe-area-inset-right)); }
 }
 
 /* ---------- avisos (também dentro de diálogos abertos) ---------- */
@@ -287,7 +288,7 @@ body.editing #runedit button.on { background: rgba(233, 185, 143, .16); color: v
 #monitor b { color: var(--green); font-weight: 600; }
 #monitor .off { color: var(--text3); }
 /* RUN: só se observa o output. Sem layers nem propriedades; a pré-visualização ocupa tudo. */
-body:not(.editing) #col-layers, body:not(.editing) #col-props, body:not(.editing) #tabs { display: none !important; }
+body:not(.editing) #col-layers, body:not(.editing) #col-props, body:not(.editing) #col-fx, body:not(.editing) #tabs { display: none !important; }
 body:not(.editing) main { grid-template-columns: minmax(0, 1fr); }
 body:not(.editing) #col-preview { grid-column: 1; }
 body:not(.editing) #monitor { display: block; }
@@ -311,3 +312,22 @@ header button { white-space: nowrap; }
 .credits { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--border); text-align: center; font: 11px/1.7 var(--mono); color: var(--text3); }
 .credits a { color: var(--text2); text-decoration: underline; text-underline-offset: 2px; }
 .credits a:hover { color: var(--accent); }
+
+/* ---------- coluna FX, badge na lista, colunas recolhíveis ---------- */
+.li-fx { flex: none; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--accent); color: var(--accent); background: var(--accent-dim); font: 600 10px var(--mono); }
+#fx select { height: var(--h); }
+.row-btns button.on { color: var(--orange); border-color: var(--orange); }
+.col-head { display: flex; align-items: center; justify-content: space-between; margin: -4px 0 6px; }
+.col-toggle { width: 28px; height: 28px; padding: 0; font: 15px var(--mono); color: var(--text3); }
+.col-toggle::before { content: "\2039"; }                  /* ‹ */
+.col-toggle[aria-expanded="false"]::before { content: "\203A"; }   /* › */
+/* RUN: sem cabeçalho de coluna (as colunas nem aparecem) */
+@media (min-width: 900px) and (min-height: 521px) {
+  body.collapse-layers { --w-layers: 38px; } body.collapse-props { --w-props: 38px; } body.collapse-fx { --w-fx: 38px; }
+  body.collapse-layers #col-layers, body.collapse-props #col-props, body.collapse-fx #col-fx { padding: 8px 4px; overflow: hidden; }
+  body.collapse-layers #col-layers .col-body, body.collapse-props #col-props .col-body, body.collapse-fx #col-fx .col-body { display: none; }
+  body.collapse-layers #col-layers .col-head, body.collapse-props #col-props .col-head, body.collapse-fx #col-fx .col-head { flex-direction: column; gap: 14px; margin: 0; }
+  body.collapse-layers #col-layers .gt, body.collapse-props #col-props .gt, body.collapse-fx #col-fx .gt { writing-mode: vertical-rl; }
+}
+#col-layers .bar h2 { display: none; }
+#col-layers .bar { justify-content: flex-end; }

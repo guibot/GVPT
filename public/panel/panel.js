@@ -153,7 +153,7 @@
   function renderList() {
     if (reorder) { reorder.stale = true; return; }          // não reconstruir a lista a meio de um arrasto
     const ul = $('#layer-list');
-    const sig = JSON.stringify([cfg.layers.map(l => [l.id, l.name, l.visible, l.locked, l.video, l.mask, l.vmask]), sel, mediaSig()]);
+    const sig = JSON.stringify([cfg.layers.map(l => [l.id, l.name, l.visible, l.locked, l.video, l.mask, l.vmask, FX.badge(l)]), sel, mediaSig()]);
     if (sig === listSig) return;
     listSig = sig;
     ul.textContent = '';
@@ -167,6 +167,7 @@
           h('div', { class: 'li-thumb', style: m ? `background-image:url("${thumbUrl(m)}")` : '' }),
           l.vmask || l.mask ? h('div', { class: 'li-mask', title: l.vmask ? 'drawn mask' : l.mask }, maskPreviewCss(layerMaskCss(l))) : null,
           h('div', { class: 'li-name', text: l.name }),
+          FX.badge(l) ? h('span', { class: 'li-fx', title: 'This layer has speed or FX applied', text: FX.badge(l) }) : null,
           h('button', { class: 'li-lock' + (l.locked ? ' on' : ''), title: l.locked ? 'Unlock: can be picked and moved in the preview' : 'Lock: cannot be picked or moved in the preview',
             'aria-label': l.locked ? 'Unlock' : 'Lock', 'aria-pressed': !!l.locked, onclick: e => { e.stopPropagation(); patchLayer(l.id, { locked: !l.locked }); } }, lockIcon(l.locked)),
           h('button', { class: 'li-eye', title: l.visible ? 'Hide' : 'Show', 'aria-label': l.visible ? 'Hide' : 'Show',
@@ -319,9 +320,9 @@
   }
 
   function buildProps() {
-    const box = $('#props'); box.textContent = ''; rows = []; selects.length = 0;
+    const box = $('#props'), fxBox = $('#fx'); box.textContent = ''; fxBox.textContent = ''; rows = []; selects.length = 0;
     const l = layerById(sel);
-    if (!l) { box.append(h('p', { class: 'empty', text: 'Select or add a layer.' })); return; }
+    if (!l) { box.append(h('p', { class: 'empty', text: 'Select or add a layer.' })); fxBox.append(h('p', { class: 'empty', text: 'Select or add a layer.' })); return; }
     const L = () => layerById(sel);
     const patch = p => patchLayer(sel, p);
     const W = cfg.output.width, H = cfg.output.height;
@@ -373,7 +374,38 @@
               const pins = L().pins.map(p => ({ ...p })); pins[i][ax] = v; patch({ pins });
             }))))),
         h('button', { text: 'Reset corners', onclick: () => patch({ pins: [0, 1, 2, 3].map(() => ({ x: 0, y: 0 })) }) })));
+    buildFx(fxBox, L, patch, group);
     syncProps(true);
+  }
+
+  // Coluna FX: velocidade e efeitos em tempo real da layer selecionada (filtros CSS + opacidade + blend; ver shared/fx.js).
+  function buildFx(box, L, patch, group) {
+    const fxPatch = p => patch({ fx: { ...L().fx, ...p } });
+    const fxRow = (label, key, range, step) => numRow(label, range, FX.LIMITS[key], step, () => L().fx[key], v => fxPatch({ [key]: v }));
+    const blend = h('select', { 'aria-label': 'Blend mode' }, FX.BLENDS.map(b => h('option', { value: b, text: b })));
+    blend.addEventListener('change', () => fxPatch({ blend: blend.value }));
+    selects.push(() => { if (document.activeElement !== blend) blend.value = L().fx.blend; });
+    const bypass = h('button', { type: 'button', title: 'Turn all the FX of this layer off and on (the speed is not affected)', onclick: () => fxPatch({ on: !L().fx.on }) });
+    selects.push(() => { const on = L().fx.on; bypass.textContent = on ? 'Bypass FX' : 'FX bypassed'; bypass.classList.toggle('on', !on); });
+    const reset = h('button', { type: 'button', text: 'Reset FX', onclick: () => patch({ speed: 1, fx: { ...FX.DEFAULTS, on: L().fx.on } }) });
+    const presets = seg([[0.25, '¼'], [0.5, '½'], [1, '1×'], [2, '2×'], [4, '4×']], () => L().speed, v => patch({ speed: v }));
+    box.append(
+      group('Playback',
+        numRow('Speed', [0.1, 4], [0.1, 4], 0.05, () => L().speed, v => patch({ speed: v })),
+        presets),
+      group('Color',
+        fxRow('Brightness', 'brightness', [0, 200], 1),
+        fxRow('Contrast', 'contrast', [0, 200], 1),
+        fxRow('Saturation', 'saturate', [0, 200], 1),
+        fxRow('Hue', 'hue', [-180, 180], 1),
+        fxRow('Invert', 'invert', [0, 100], 1),
+        fxRow('Grayscale', 'grayscale', [0, 100], 1),
+        fxRow('Sepia', 'sepia', [0, 100], 1)),
+      group('Blur & mix',
+        fxRow('Blur', 'blur', [0, 40], 0.5),
+        fxRow('Opacity', 'opacity', [0, 100], 1),
+        h('label', { class: 'field' }, 'BLEND', blend)),
+      h('div', { class: 'row-btns' }, bypass, reset));
   }
 
   const scheduleProps = () => { propsKey = ''; scheduleRender(); };
@@ -437,6 +469,7 @@
       const mk = layerMaskCss(l);
       if (e.dataset.mask !== mk) { e.dataset.mask = mk; e.style.webkitMaskImage = e.style.maskImage = mk; }
       Geometry.apply(e, [e.firstChild], l, boxDims(l), vidDims(l));
+      FX.apply(e, l);
     });
     // contorno e pegas da layer selecionada
     const l = layerById(sel);
@@ -522,6 +555,27 @@
     const v = media.find(m => m.kind === 'video');
     sendOp({ op: 'addLayer', layer: { name: `Layer ${cfg.layers.length + 1}`, video: v ? v.name : null } });
   });
+  // Colunas recolhíveis (só em ecrãs largos): Layers, Adjust e FX encolhem para uma tira estreita. O estado fica guardado neste browser.
+  const COLS = ['layers', 'props', 'fx'];
+  let collapsed = [];
+  try { collapsed = JSON.parse(localStorage.getItem('collapsedCols') || '[]').filter(c => COLS.includes(c)); } catch {}
+  function applyCollapsed() {
+    for (const c of COLS) document.body.classList.toggle('collapse-' + c, collapsed.includes(c));
+    for (const b of document.querySelectorAll('.col-toggle')) {
+      const off = collapsed.includes(b.dataset.col);
+      b.setAttribute('aria-expanded', !off); b.title = off ? 'Expand' : 'Collapse';
+    }
+    try { localStorage.setItem('collapsedCols', JSON.stringify(collapsed)); } catch {}
+    if (cfg) scheduleRender();                               // a pré-visualização muda de largura
+  }
+  for (const b of document.querySelectorAll('.col-toggle')) b.addEventListener('click', () => {
+    const c = b.dataset.col;
+    collapsed = collapsed.includes(c) ? collapsed.filter(x => x !== c) : [...collapsed, c];
+    applyCollapsed();
+  });
+  applyCollapsed();
+  addEventListener('resize', () => { if (cfg) scheduleRender(); });
+
   for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => {
     document.body.dataset.tab = b.dataset.tab;
     document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));

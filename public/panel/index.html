@@ -38,9 +38,12 @@
 
   <main>
     <section id="col-layers" aria-label="Layers">
-      <div id="edit-note" class="edit-note" hidden></div>
-      <div class="bar"><h2>Layers</h2><button id="btn-add" class="primary">+ Layer</button></div>
-      <ul id="layer-list"></ul>
+      <div class="col-head"><span class="gt">Layers</span><button class="col-toggle ghost" data-col="layers" aria-expanded="true" title="Collapse"></button></div>
+      <div class="col-body">
+        <div id="edit-note" class="edit-note" hidden></div>
+        <div class="bar"><h2>Layers</h2><button id="btn-add" class="primary">+ Layer</button></div>
+        <ul id="layer-list"></ul>
+      </div>
     </section>
 
     <section id="col-preview" aria-label="Preview">
@@ -55,10 +58,17 @@
     <nav id="tabs">
       <button data-tab="layers" class="on">Layers</button>
       <button data-tab="props">Adjust</button>
+      <button data-tab="fx">FX</button>
     </nav>
 
     <section id="col-props" aria-label="Properties">
-      <div id="props"></div>
+      <div class="col-head"><span class="gt">Adjust</span><button class="col-toggle ghost" data-col="props" aria-expanded="true" title="Collapse"></button></div>
+      <div class="col-body"><div id="props"></div></div>
+    </section>
+
+    <section id="col-fx" aria-label="FX">
+      <div class="col-head"><span class="gt">FX</span><button class="col-toggle ghost" data-col="fx" aria-expanded="true" title="Collapse"></button></div>
+      <div class="col-body"><div id="fx"></div></div>
     </section>
   </main>
 </div>
@@ -167,6 +177,7 @@
 
 <script src="/shared/clienterr.js"></script>
 <script src="/shared/geometry.js"></script>
+<script src="/shared/fx.js"></script>
 <script src="/shared/vmask.js"></script>
 <script src="maskedit.js"></script>
 <script src="panel.js"></script>

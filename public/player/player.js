@@ -45,13 +45,20 @@
   // passa a ser o visível. O atributo `loop` simples deixa 1-3 frames parados em cada volta.
   // Interruptor "player desligado": pára todos os vídeos (o ecrã fica no último frame). Nada chama play() enquanto estiver parado.
   let halted = false;
-  const LEAD = 0.12;   // segundos antes do fim em que o vídeo seguinte arranca
+  const LEAD = 0.12;   // segundos (reais) antes do fim em que o vídeo seguinte arranca
+  const leadFor = L => Math.max(LEAD * (L.rate || 1), 0.08);   // em tempo do vídeo: a 4x arranca mais cedo, a 0.25x não espera pelo fim
 
   function makeVideo() {
     const v = document.createElement('video');
     v.muted = true; v.playsInline = true; v.preload = 'auto'; v.disablePictureInPicture = true;
     v.style.opacity = 0;
     return v;
+  }
+
+  // Velocidade de reprodução. O defaultPlaybackRate também conta: load() (ao trocar de ficheiro) repõe o playbackRate a partir dele.
+  function setRate(L) {
+    const r = L.rate || 1;
+    for (const v of L.videos) { if (v.defaultPlaybackRate !== r) v.defaultPlaybackRate = r; if (v.playbackRate !== r) v.playbackRate = r; }
   }
 
   function createLayer(id) {
@@ -61,7 +68,7 @@
     videos.forEach(v => el.appendChild(v));
     videos[0].style.opacity = 1;
     stage.appendChild(el);
-    const L = { id, el, videos, cur: 0, starting: false, cfg: null, vw: 0, vh: 0, srcName: null, maskKey: null,
+    const L = { id, el, videos, cur: 0, rate: 1, starting: false, cfg: null, vw: 0, vh: 0, srcName: null, maskKey: null,
                 wraps: [], lastNow: 0, lastShown: 0, frames: 0, get video() { return this.videos[this.cur]; } };
 
     const standby = () => videos[L.cur ^ 1];
@@ -81,7 +88,7 @@
     };
 
     videos.forEach((v, i) => {
-      v.addEventListener('loadedmetadata', () => { if (!L.vw) { L.vw = v.videoWidth; L.vh = v.videoHeight; } applyGeometry(L); });
+      v.addEventListener('loadedmetadata', () => { setRate(L); if (!L.vw) { L.vw = v.videoWidth; L.vh = v.videoHeight; } applyGeometry(L); });
       v.addEventListener('error', () => console.warn('[player] video error', L.srcName, v.error && v.error.message));
       v.addEventListener('ended', () => {                   // rede de segurança
         if (i !== L.cur || L.starting || halted) return;
@@ -92,7 +99,7 @@
         if (i === L.cur) {
           L.frames++; L.lastNow = now;
           L.lastShown = now;
-          if (v.duration && v.duration - meta.mediaTime <= LEAD) startStandby();
+          if (v.duration && v.duration - meta.mediaTime <= leadFor(L)) startStandby();
         } else if (L.starting && meta.mediaTime > 0) {
           swap(now);
         }
@@ -106,6 +113,8 @@
   function updateLayer(L, c, index) {
     L.cfg = c;
     L.el.style.zIndex = index;                               // ordem do array = de baixo para cima
+    L.rate = c.speed || 1; setRate(L);
+    FX.apply(L.el, c);                                       // filtros, opacidade e modo de mistura
 
     if (L.srcName !== c.video) {                             // só reinicia o vídeo se o ficheiro mudou
       L.srcName = c.video; L.vw = L.vh = 0; L.starting = false; L.cur = 0;

@@ -27,7 +27,19 @@ const LIMITS = {
   vmaskSize: [16, 4096],       // máscara desenhada: largura e altura
   vmaskCoord: [-20000, 20000], // coordenadas dos pontos (podem sair da caixa; o excesso é cortado)
   feather: [0, 200],           // desfoque das bordas, em píxeis da máscara
+  speed: [0.1, 4],             // velocidade de reprodução do vídeo (1 = normal)
 };
+// Efeitos em tempo real por layer (filtros CSS + opacidade + modo de mistura). Têm de coincidir com public/shared/fx.js.
+const FX_LIMITS = {
+  brightness: [0, 300], contrast: [0, 300], saturate: [0, 300],   // %, 100 = normal
+  hue: [-180, 180],                                                // graus
+  invert: [0, 100], grayscale: [0, 100], sepia: [0, 100],          // %
+  blur: [0, 100],                                                  // píxeis
+  opacity: [0, 100],                                               // %
+};
+const FX_DEFAULTS = { brightness: 100, contrast: 100, saturate: 100, hue: 0, invert: 0, grayscale: 0, sepia: 0, blur: 0, opacity: 100 };
+const BLEND_MODES = ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'color-dodge', 'color-burn', 'hard-light', 'soft-light',
+  'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'];
 // Limites da máscara desenhada (mantêm cada mensagem bem abaixo do limite do WebSocket).
 const VMASK_MAX_SHAPES = 32;
 const VMASK_MAX_POINTS = 256;    // por polígono
@@ -77,6 +89,14 @@ function normalizeVmask(v) {
   };
 }
 
+function normalizeFx(v) {
+  v = v && typeof v === 'object' ? v : {};
+  const fx = { on: v.on !== false };                // on=false: ignora os efeitos sem perder os valores (bypass)
+  for (const k in FX_DEFAULTS) fx[k] = Math.round(num(v[k], FX_DEFAULTS[k], FX_LIMITS[k]) * 100) / 100;
+  fx.blend = BLEND_MODES.includes(v.blend) ? v.blend : 'normal';
+  return fx;
+}
+
 function normalizeLayer(l, output) {
   l = l && typeof l === 'object' ? l : {};
   const pins = Array.isArray(l.pins) ? l.pins : [];
@@ -91,6 +111,8 @@ function normalizeLayer(l, output) {
     maskMode: l.maskMode === 'luminance' ? 'luminance' : 'alpha',
     vmask: normalizeVmask(l.vmask),                  // se existir, substitui o PNG da máscara
     videoScale: num(l.videoScale, 1, LIMITS.videoScale),
+    speed: Math.round(num(l.speed, 1, LIMITS.speed) * 100) / 100,   // velocidade de reprodução
+    fx: normalizeFx(l.fx),
     videoOffsetX: num(l.videoOffsetX, 0, LIMITS.videoOffsetX),
     videoOffsetY: num(l.videoOffsetY, 0, LIMITS.videoOffsetY),
     x: num(l.x, output.width / 2, LIMITS.x),         // centro da layer, em píxeis de saída
@@ -159,7 +181,7 @@ const findIndex = (c, id) => {
 };
 // Campos que o painel pode alterar (o id nunca muda).
 const PATCHABLE = ['name', 'visible', 'locked', 'video', 'mask', 'vmask', 'maskScale', 'maskMode', 'videoScale', 'videoOffsetX',
-  'videoOffsetY', 'x', 'y', 'scale', 'rotation', 'pins'];
+  'videoOffsetY', 'x', 'y', 'scale', 'rotation', 'pins', 'speed', 'fx'];
 
 // Aplica uma operação e devolve uma configuração nova (a original não é alterada).
 function applyOp(config, op) {
@@ -226,5 +248,5 @@ function applyOp(config, op) {
   return out;
 }
 
-module.exports = { validConvertSize, normalize, applyOp, publicConfig, verifyPin, hashPin, OpError, LIMITS, RESOLUTIONS, MAX_LAYERS, SCHEMA_VERSION,
+module.exports = { validConvertSize, normalize, applyOp, publicConfig, verifyPin, hashPin, OpError, LIMITS, FX_LIMITS, FX_DEFAULTS, BLEND_MODES, RESOLUTIONS, MAX_LAYERS, SCHEMA_VERSION,
   VMASK_MAX_SHAPES, VMASK_MAX_POINTS, VMASK_MAX_TOTAL };

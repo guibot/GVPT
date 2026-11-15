@@ -188,3 +188,21 @@ test('conversão: qualquer tamanho inteiro de 64 a 4096; splash ligado por defei
   assert.equal(c.splash, true);
   assert.equal(applyOp(c, { op: 'setSplash', enabled: false }).splash, false);
 });
+
+test('speed e fx: defaults, limites e modo de mistura inválido', () => {
+  const l0 = applyOp(base(), { op: 'addLayer' }).layers[0];
+  assert.equal(l0.speed, 1);
+  assert.deepEqual(l0.fx, { on: true, brightness: 100, contrast: 100, saturate: 100, hue: 0, invert: 0, grayscale: 0, sepia: 0, blur: 0, opacity: 100, blend: 'normal' });
+  const l = normalize({ layers: [{ id: 'a', speed: 99, fx: { brightness: -5, hue: 1e6, blur: 'x', blend: 'xpto', on: false } }] }).layers[0];
+  assert.equal(l.speed, 4); assert.equal(l.fx.brightness, 0); assert.equal(l.fx.hue, 180);
+  assert.equal(l.fx.blur, 0); assert.equal(l.fx.blend, 'normal'); assert.equal(l.fx.on, false);
+});
+
+test('updateLayer aceita speed e fx e a cópia herda-os', () => {
+  let c = applyOp(base(), { op: 'addLayer' });
+  const id = c.layers[0].id;
+  c = applyOp(c, { op: 'updateLayer', id, patch: { speed: 0.5, fx: { ...c.layers[0].fx, grayscale: 100, blend: 'screen' } } });
+  assert.equal(c.layers[0].speed, 0.5); assert.equal(c.layers[0].fx.grayscale, 100); assert.equal(c.layers[0].fx.blend, 'screen');
+  c = applyOp(c, { op: 'duplicateLayer', id });
+  assert.equal(c.layers[1].speed, 0.5); assert.equal(c.layers[1].fx.blend, 'screen');
+});
