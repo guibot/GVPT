@@ -67,6 +67,9 @@ main > section { overflow: auto; min-height: 0; padding: 12px; }
 #col-props, #col-fx { border-right: 1px solid var(--border); background: var(--surface); padding-top: 4px; }
 #col-preview { display: flex; flex-direction: column; padding: 16px; }
 .bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.bar-btns { display: flex; gap: 6px; }
+.bar-btns [hidden] { display: none; }
+.row-btns .push-right { margin-left: auto; }
 .bar h2, .gt { font: 600 10px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--text3); }
 
 /* ---- lista de layers ---- */

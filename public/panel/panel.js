@@ -354,6 +354,30 @@
     return h('div', { class: 'field pk' }, label, wrap);
   }
 
+  // Área de cópia guardada no localStorage (sobrevive a um refresh do painel). get() devolve sempre uma cópia nova.
+  function clipStore(key, migrate = v => v) {
+    let v = null;
+    try { v = migrate(JSON.parse(localStorage.getItem(key) || 'null')); } catch {}
+    return {
+      get: () => (v ? JSON.parse(JSON.stringify(v)) : null),
+      set: m => { v = JSON.parse(JSON.stringify(m)); try { localStorage.setItem(key, JSON.stringify(v)); } catch {} },
+    };
+  }
+  // Máscara copiada: a desenhada (vmask) ou o PNG, com o modo e a escala. Formato: { vmask, mask, maskMode, maskScale }
+  // (uma cópia antiga, só com a vmask, também serve).
+  const maskClip = clipStore('maskClip', v => (v && v.shapes ? { vmask: v } : v));
+  // Layer copiada: todos os parâmetros (menos o id e o locked). Cola-se como layer nova ou por cima da selecionada.
+  const LAYER_FIELDS = ['name', 'visible', 'video', 'mask', 'vmask', 'maskScale', 'maskMode', 'videoScale', 'videoOffsetX',
+    'videoOffsetY', 'x', 'y', 'scale', 'rotation', 'pins', 'speed', 'fx', 'mirrorX', 'mirrorY'];
+  const layerClip = clipStore('layerClip');
+  const layerParams = l => Object.fromEntries(LAYER_FIELDS.filter(k => k in l).map(k => [k, l[k]]));
+  function pasteLayerNew() {
+    const c = layerClip.get(); if (!c) return;
+    awaitNew = true;
+    sendOp({ op: 'addLayer', layer: { ...c, name: (c.name + ' (copy)').slice(0, 80) } });
+    toast('Layer pasted');
+  }
+
   function buildProps() {
     const box = $('#props'), fxBox = $('#fx'); box.textContent = ''; fxBox.textContent = ''; rows = []; selects.length = 0;
     const l = layerById(sel);
@@ -381,6 +405,16 @@
 
     box.append(
       group('Layer',
+        h('div', { class: 'row-btns tight' },
+          h('button', { type: 'button', text: 'Copy layer', title: 'Copy this layer with all its parameters (video, mask, position, scale, rotation, corners, FX...)', onclick: () => {
+            layerClip.set(layerParams(L())); toast('Layer copied'); scheduleProps(); syncPasteBtn();
+          } }),
+          layerClip.get() ? h('button', { type: 'button', class: 'push-right', text: 'Paste layer parameters', title: 'Replace all the parameters of this layer with the copied ones (the name stays)', onclick: () => {
+            const c = layerClip.get(); if (!c) return;
+            if (!confirm(`Replace all the parameters of "${L().name}" with the copied layer?`)) return;
+            delete c.name; if (!('vmask' in c)) c.vmask = null;
+            editor.stop(); patch(c); toast('Layer pasted'); scheduleProps();
+          } }) : null),
         h('label', { class: 'field' }, 'NAME', name),
         mediaSelect('VIDEO', 'video', 'video'),
         mediaSelect('MASK', 'mask', 'mask')),
@@ -396,6 +430,22 @@
           h('button', { type: 'button', class: 'primary', text: l.vmask ? 'Edit drawing' : 'Draw mask', onclick: () => editor.start() }),
           l.vmask ? h('button', { type: 'button', class: 'danger', text: 'Delete drawing', onclick: () => {
             if (confirm('Delete the drawn mask of this layer?' + (l.mask ? ' It goes back to using the PNG.' : ''))) { editor.stop(); patch({ vmask: null }); scheduleProps(); }
+          } }) : null),
+        h('div', { class: 'row-btns tight' },
+          l.vmask || l.mask ? h('button', { type: 'button', text: 'Copy mask', title: 'Copy this mask (drawn or PNG, with mode and scale), to paste it on another layer', onclick: () => {
+            const ly = L();
+            maskClip.set(ly.vmask ? { vmask: ly.vmask, maskMode: ly.maskMode, maskScale: ly.maskScale }
+                                  : { mask: ly.mask, maskMode: ly.maskMode, maskScale: ly.maskScale });
+            toast(ly.vmask ? 'Drawn mask copied' : 'PNG mask copied'); scheduleProps();
+          } }) : null,
+          maskClip.get() ? h('button', { type: 'button', text: 'Paste mask', title: 'Use the copied mask on this layer', onclick: () => {
+            const c = maskClip.get(); if (!c) return;
+            const ly = L();
+            if ((ly.vmask || ly.mask) && !confirm('Replace the mask of this layer with the copied one?')) return;
+            const p = c.vmask ? { vmask: c.vmask } : { mask: c.mask, vmask: null };   // um PNG colado tira a desenhada (senão ficava por cima)
+            if (c.maskMode) p.maskMode = c.maskMode;
+            if (c.maskScale != null) p.maskScale = c.maskScale;
+            editor.stop(); patch(p); toast('Mask pasted'); scheduleProps();
           } }) : null),
         l.vmask && l.mask ? h('p', { class: 'hint', text: 'The drawn mask replaces the PNG chosen above.' }) : null,
         numRow('Scale', [0.1, 5], LIM.maskScale, 0.01, () => L().maskScale, v => patch({ maskScale: v }))),
@@ -586,6 +636,9 @@
   function renderAll() { renderList(); syncProps(); renderPreview(); renderMonitor(); }
 
   // ---------- botões, separadores ----------
+  const syncPasteBtn = () => { $('#btn-paste-layer').hidden = !layerClip.get(); };
+  $('#btn-paste-layer').addEventListener('click', pasteLayerNew);
+  syncPasteBtn();
   $('#btn-add').addEventListener('click', () => {
     awaitNew = true;
     const v = media.find(m => m.kind === 'video');
