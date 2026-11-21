@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const SCHEMA_VERSION = 2;
 const RESOLUTIONS = [[1920, 1080], [1280, 720]];
 const MAX_LAYERS = 32;
+const MESH_MAX = 4;                            // células por eixo da mesh (1 a 4). 1x1 = corner pin normal. Tem de coincidir com public/shared/mesh.js
 const CONVERT_SIZE = [64, 4096];                  // largura e altura máximas da conversão (qualquer inteiro neste intervalo)
 const DEFAULT_CONVERT_SIZE = [960, 540];
 const CONVERT_FPS = [25, 30];
@@ -24,6 +25,7 @@ const LIMITS = {
   x: [-10000, 10000],
   y: [-10000, 10000],
   pin: [-3000, 3000],          // cada deslocamento de canto (corner pin), em píxeis de saída
+  meshPt: [-3000, 3000],       // cada deslocamento de um ponto da mesh, em píxeis de saída
   vmaskSize: [16, 4096],       // máscara desenhada: largura e altura
   vmaskCoord: [-20000, 20000], // coordenadas dos pontos (podem sair da caixa; o excesso é cortado)
   feather: [0, 200],           // desfoque das bordas, em píxeis da máscara
@@ -45,6 +47,15 @@ const VMASK_MAX_SHAPES = 32;
 const VMASK_MAX_POINTS = 256;    // por polígono
 const VMASK_MAX_TOTAL = 1500;    // em toda a máscara
 const NAME_MAX = 80;
+const SOURCES = ['video', 'color'];   // de onde vem o conteúdo da layer: ficheiro de vídeo ou cor sólida
+const COLOR_RE = /^#[0-9a-f]{6}$/;
+// Cor sólida: aceita #rgb ou #rrggbb (qualquer caixa) e guarda sempre #rrggbb em minúsculas.
+function colorHex(v, d = '#ffffff') {
+  if (typeof v !== 'string') return d;
+  let x = v.trim().toLowerCase();
+  if (/^#[0-9a-f]{3}$/.test(x)) x = '#' + x.slice(1).split('').map(ch => ch + ch).join('');
+  return COLOR_RE.test(x) ? x : d;
+}
 const PIN_RE = /^\d{4,8}$/;
 
 const validConvertSize = (w, h) => [w, h].every(v => Number.isInteger(v) && v >= CONVERT_SIZE[0] && v <= CONVERT_SIZE[1]);
@@ -97,6 +108,18 @@ function normalizeFx(v) {
   return fx;
 }
 
+// Mesh: grelha de cols x rows células; pts = deslocamento (px de saída) de cada ponto, linha a linha. Os cantos ficam sempre a 0 (são o corner pin).
+function normalizeMesh(v) {
+  v = v && typeof v === 'object' ? v : {};
+  const cols = Math.round(num(v.cols, 1, [1, MESH_MAX])), rows = Math.round(num(v.rows, 1, [1, MESH_MAX]));
+  const src = Array.isArray(v.pts) ? v.pts : [], pts = [];
+  for (let j = 0; j <= rows; j++) for (let i = 0; i <= cols; i++) {
+    const corner = (i === 0 || i === cols) && (j === 0 || j === rows), p = src[j * (cols + 1) + i];
+    pts.push(corner ? { x: 0, y: 0 } : { x: num(p && p.x, 0, LIMITS.meshPt), y: num(p && p.y, 0, LIMITS.meshPt) });
+  }
+  return { cols, rows, smooth: v.smooth === true, pts };
+}
+
 function normalizeLayer(l, output) {
   l = l && typeof l === 'object' ? l : {};
   const pins = Array.isArray(l.pins) ? l.pins : [];
@@ -105,7 +128,9 @@ function normalizeLayer(l, output) {
     name: (typeof l.name === 'string' && l.name.trim() ? l.name : 'Layer').slice(0, NAME_MAX),
     visible: l.visible !== false,
     locked: l.locked === true,                       // só impede escolher/mover a layer na pré-visualização do painel
+    source: SOURCES.includes(l.source) ? l.source : 'video',   // 'color': cor sólida em vez de vídeo (o vídeo escolhido fica guardado)
     video: mediaName(l.video),
+    color: colorHex(l.color),
     mask: mediaName(l.mask),
     maskScale: num(l.maskScale, 1, LIMITS.maskScale),
     maskMode: l.maskMode === 'luminance' ? 'luminance' : 'alpha',
@@ -118,6 +143,7 @@ function normalizeLayer(l, output) {
     x: num(l.x, output.width / 2, LIMITS.x),         // centro da layer, em píxeis de saída
     y: num(l.y, output.height / 2, LIMITS.y),
     scale: num(l.scale, 1, LIMITS.scale),
+    mesh: normalizeMesh(l.mesh),                     // 1x1 = só corner pin; mais células = grelha de pontos por cima dele
     mirrorX: l.mirrorX === true,                     // espelho horizontal / vertical (vira a layer dentro do quadrilátero final)
     mirrorY: l.mirrorY === true,
     rotation: num(l.rotation, 0, LIMITS.rotation),   // em torno do centro, graus, sentido horário
@@ -182,8 +208,8 @@ const findIndex = (c, id) => {
   return i;
 };
 // Campos que o painel pode alterar (o id nunca muda).
-const PATCHABLE = ['name', 'visible', 'locked', 'video', 'mask', 'vmask', 'maskScale', 'maskMode', 'videoScale', 'videoOffsetX',
-  'videoOffsetY', 'x', 'y', 'scale', 'rotation', 'pins', 'speed', 'fx', 'mirrorX', 'mirrorY'];
+const PATCHABLE = ['name', 'visible', 'locked', 'source', 'color', 'video', 'mask', 'vmask', 'maskScale', 'maskMode', 'videoScale', 'videoOffsetX',
+  'videoOffsetY', 'x', 'y', 'scale', 'rotation', 'pins', 'speed', 'fx', 'mirrorX', 'mirrorY', 'mesh'];
 
 // Aplica uma operação e devolve uma configuração nova (a original não é alterada).
 function applyOp(config, op) {
@@ -225,7 +251,7 @@ function applyOp(config, op) {
       if (!RESOLUTIONS.some(([w, h]) => w === op.width && h === op.height)) throw new OpError('unsupported resolution');
       // Mantém a composição igual em proporção (as duas resoluções são 16:9): posição, escala e pins.
       const k = op.width / c.output.width;
-      for (const l of c.layers) { l.x *= k; l.y *= k; l.scale *= k; for (const p of l.pins) { p.x *= k; p.y *= k; } }
+      for (const l of c.layers) { l.x *= k; l.y *= k; l.scale *= k; for (const p of l.pins.concat(l.mesh.pts)) { p.x *= k; p.y *= k; } }
       c.output = { width: op.width, height: op.height };
       break;
     }
@@ -250,5 +276,5 @@ function applyOp(config, op) {
   return out;
 }
 
-module.exports = { validConvertSize, normalize, applyOp, publicConfig, verifyPin, hashPin, OpError, LIMITS, FX_LIMITS, FX_DEFAULTS, BLEND_MODES, RESOLUTIONS, MAX_LAYERS, SCHEMA_VERSION,
+module.exports = { validConvertSize, normalize, applyOp, publicConfig, verifyPin, hashPin, OpError, LIMITS, FX_LIMITS, FX_DEFAULTS, BLEND_MODES, SOURCES, RESOLUTIONS, MAX_LAYERS, SCHEMA_VERSION,
   VMASK_MAX_SHAPES, VMASK_MAX_POINTS, VMASK_MAX_TOTAL };

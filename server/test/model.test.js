@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { normalize, applyOp, publicConfig, verifyPin, OpError, MAX_LAYERS } = require('../lib/model');
 
 const base = () => normalize({});
+const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
 
 test('configuração vazia fica com valores por defeito', () => {
   const c = base();
@@ -213,4 +214,60 @@ test('mirrorX/mirrorY: false por defeito, só true estrito liga', () => {
   assert.equal(normalize({ layers: [{ id: 'a', mirrorX: 1 }] }).layers[0].mirrorX, false);
   c = applyOp(c, { op: 'updateLayer', id: c.layers[0].id, patch: { mirrorX: true } });
   assert.equal(c.layers[0].mirrorX, true); assert.equal(c.layers[0].mirrorY, false);
+});
+
+test('mesh: 1x1 por defeito (4 pontos a zero); cols/rows 1 a 4; os cantos ficam sempre a 0', () => {
+  let c = applyOp(base(), { op: 'addLayer' });
+  const id = c.layers[0].id;
+  assert.deepEqual(c.layers[0].mesh, { cols: 1, rows: 1, smooth: false, pts: [0, 1, 2, 3].map(() => ({ x: 0, y: 0 })) });
+  const pts = Array.from({ length: 9 }, (_, k) => ({ x: k + 1, y: -(k + 1) }));      // 2x2 células = 3x3 pontos; o ponto 4 é o centro
+  c = applyOp(c, { op: 'updateLayer', id, patch: { mesh: { cols: 2, rows: 2, smooth: true, pts } } });
+  const m = c.layers[0].mesh;
+  assert.equal(m.cols, 2); assert.equal(m.rows, 2); assert.equal(m.smooth, true); assert.equal(m.pts.length, 9);
+  for (const k of [0, 2, 6, 8]) assert.deepEqual(m.pts[k], { x: 0, y: 0 });         // cantos
+  assert.deepEqual(m.pts[4], { x: 5, y: -5 }); assert.deepEqual(m.pts[1], { x: 2, y: -2 });
+});
+
+test('mesh: valores inválidos são corrigidos (grelha fora de 1..4, pontos a mais ou a menos, deslocamento enorme)', () => {
+  const l = normalize({ layers: [{ id: 'a', mesh: { cols: 9, rows: 0, smooth: 'sim', pts: [{ x: 1, y: 1 }, { x: 'x' }] } }] }).layers[0];
+  assert.equal(l.mesh.cols, 4); assert.equal(l.mesh.rows, 1); assert.equal(l.mesh.smooth, false);
+  assert.equal(l.mesh.pts.length, 10);                                                // (4+1) x (1+1)
+  assert.deepEqual(l.mesh.pts[1], { x: 0, y: 0 });
+  assert.equal(normalize({ layers: [{ id: 'b', mesh: 5 }] }).layers[0].mesh.cols, 1);
+  const big = normalize({ layers: [{ id: 'c', mesh: { cols: 2, rows: 1, pts: [{}, { x: 1e9, y: -1e9 }] } }] }).layers[0].mesh;
+  assert.deepEqual(big.pts[1], { x: 3000, y: -3000 });
+});
+
+test('mesh: duplicar copia a mesh; mudar a resolução escala os pontos como os pins', () => {
+  let c = applyOp(base(), { op: 'addLayer' });
+  const id = c.layers[0].id;
+  c = applyOp(c, { op: 'updateLayer', id, patch: { mesh: { cols: 2, rows: 1, pts: [{}, { x: 10, y: 20 }] } } });
+  c = applyOp(c, { op: 'duplicateLayer', id });
+  assert.deepEqual(c.layers[1].mesh, c.layers[0].mesh);
+  c = applyOp(c, { op: 'setOutput', width: 1280, height: 720 });          // 1920 -> 1280: fator 2/3
+  near(c.layers[0].mesh.pts[1].x, 10 * 1280 / 1920); near(c.layers[0].mesh.pts[1].y, 20 * 1280 / 1920);
+});
+
+test('source e color: defaults, cores inválidas e #rgb', () => {
+  const l0 = applyOp(base(), { op: 'addLayer' }).layers[0];
+  assert.equal(l0.source, 'video'); assert.equal(l0.color, '#ffffff');
+  const ls = normalize({ layers: [
+    { id: 'a', source: 'color', color: '#F0A' },
+    { id: 'b', source: 'xpto', color: 'red' },
+    { id: 'c', source: 'color', color: '#12345g' },
+  ] }).layers;
+  assert.equal(ls[0].source, 'color'); assert.equal(ls[0].color, '#ff00aa');
+  assert.equal(ls[1].source, 'video'); assert.equal(ls[1].color, '#ffffff');
+  assert.equal(ls[2].color, '#ffffff');
+});
+
+test('updateLayer troca a fonte para cor sem perder o vídeo escolhido', () => {
+  let c = applyOp(base(), { op: 'addLayer', layer: { video: 'v.mp4' } });
+  const id = c.layers[0].id;
+  c = applyOp(c, { op: 'updateLayer', id, patch: { source: 'color', color: '#00ff00' } });
+  assert.equal(c.layers[0].source, 'color'); assert.equal(c.layers[0].color, '#00ff00'); assert.equal(c.layers[0].video, 'v.mp4');
+  c = applyOp(c, { op: 'duplicateLayer', id });
+  assert.equal(c.layers[1].source, 'color'); assert.equal(c.layers[1].color, '#00ff00');
+  c = applyOp(c, { op: 'updateLayer', id, patch: { source: 'video' } });
+  assert.equal(c.layers[0].source, 'video'); assert.equal(c.layers[0].video, 'v.mp4');
 });

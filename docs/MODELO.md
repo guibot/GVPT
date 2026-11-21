@@ -35,7 +35,9 @@ e `server/lib/config.js` (gravação em disco). O player desenha em `public/play
 | `name` | `Layer` | 80 car. | Nome no painel. |
 | `visible` | `true` | | Escondida = fica em pausa. |
 | `locked` | `false` | | Bloqueada: **só afeta o painel** (não se escolhe nem se move na pré-visualização). O player ignora-o. Duplicar dá uma cópia desbloqueada. |
-| `video` | `null` | nome de ficheiro | Ficheiro em `data/media/` (só o nome, sem caminhos). |
+| `source` | `video` | `video`\|`color` | De onde vem o conteúdo: o ficheiro `video` ou a cor sólida `color`. Ao passar para `color`, o `video` fica guardado (voltar a `video` retoma-o). |
+| `video` | `null` | nome de ficheiro | Ficheiro em `data/media/` (só o nome, sem caminhos). Ignorado com `source` = `color`. |
+| `color` | `#ffffff` | `#rrggbb` | Cor sólida (com `source` = `color`). Aceita `#rgb`; guarda-se sempre `#rrggbb` em minúsculas. |
 | `mask` | `null` | nome de ficheiro | PNG em `data/media/`. |
 | `maskScale` | 1 | 0,01 a 20 | Escala da máscara dentro da caixa (1 = tamanho exato do PNG). |
 | `maskMode` | `alpha` | `alpha`\|`luminance` | `alpha`: opaco = visível. `luminance`: branco = visível. |
@@ -46,6 +48,7 @@ e `server/lib/config.js` (gravação em disco). O player desenha em `public/play
 | `scale` | 1 | 0,01 a 20 | Escala da layer, em torno do seu centro. |
 | `rotation` | 0 | ±360 | Rotação da layer em graus, sentido horário, em torno do centro. |
 | `pins` | 4×`{0,0}` | ±3000 | Corner pin: deslocamento de cada canto, em píxeis de saída. Ordem: TL, TR, BR, BL. |
+| `mesh` | 1×1 | ver abaixo | Grelha de pontos por cima do corner pin. 1×1 = só corner pin. |
 
 Valores fora dos limites são cortados; valores inválidos voltam ao padrão. Nomes de ficheiro com `/`, `\` ou
 a começar por `.` são rejeitados (sem `../`).
@@ -74,6 +77,8 @@ resto da cadeia (passos abaixo) é igual ao de um PNG. As formas só existem na 
 **A máscara define a caixa.** A caixa da layer tem o tamanho nativo do PNG da máscara (ex.: 800×600) e é ela
 que fixa a posição global e a proporção da layer. Sem máscara, a caixa tem o tamanho nativo do vídeo. Assim,
 trocar de vídeo (de qualquer resolução ou proporção) não mexe na máscara: só muda o conteúdo lá dentro.
+Numa layer de **cor sólida** (`source` = `color`) não há vídeo: sem máscara a caixa tem 1920×1080
+(`Geometry.COLOR_SIZE`) e a cor enche sempre a caixa toda (`videoScale`, `videoOffsetX/Y` e `speed` não se aplicam).
 
 Para cada layer, por esta ordem:
 
@@ -87,9 +92,36 @@ Para cada layer, por esta ordem:
 4. **Corner pin (afinação final).** Cada um dos 4 cantos da caixa, já posicionada, é deslocado por `pins[i]`.
    O resultado é uma transformação de perspetiva (homografia) da caixa para o quadrilátero final.
 
-Os passos 3 e 4 resumem-se a uma única `matrix3d`. Como a máscara está no mesmo elemento que recebe a
+5. **Mesh (opcional).** Com `mesh` maior que 1×1, cada ponto da grelha é ainda deslocado (ver "Mesh" abaixo).
+
+Os passos 3 e 4 resumem-se a uma única `matrix3d` (sem mesh). Como a máscara está no mesmo elemento que recebe a
 `matrix3d`, ela é deformada pelo corner pin em conjunto com o vídeo. O código está em
 `public/shared/geometry.js`, usado pelo player e pela pré-visualização do painel (para coincidirem).
+
+## Mesh (`mesh`)
+
+```json
+{ "cols": 3, "rows": 2, "smooth": false,
+  "pts": [ {"x":0,"y":0}, {"x":0,"y":0}, {"x":0,"y":0}, {"x":0,"y":0},
+           {"x":0,"y":0}, {"x":12,"y":-30}, {"x":0,"y":0}, {"x":0,"y":0},
+           {"x":0,"y":0}, {"x":0,"y":0}, {"x":0,"y":0}, {"x":0,"y":0} ] }
+```
+
+- `cols` × `rows`: número de **células**, de 1 a 4 em cada eixo (16 presets: 1×1, 1×2 ... 4×4). **1×1 é o corner pin
+  normal** e as layers continuam a ser desenhadas com uma só `matrix3d`.
+- `pts`: `(cols+1)·(rows+1)` pontos, linha a linha (índice = `linha·(cols+1) + coluna`). Cada um é o deslocamento, em
+  píxeis de saída, em relação à posição que a homografia da layer (posição, escala, rotação, corner pin e espelho)
+  lhe dá. Os **4 cantos ficam sempre a 0**: são as pegas do corner pin. Com todos os pontos a 0 o resultado é
+  exatamente o do corner pin. Limite de cada valor: ±3000.
+- `smooth`: `false` = interpolação linear (arestas retas entre células, bom para esquinas); `true` = suave
+  (Catmull-Rom, a curva passa pelos pontos, bom para colunas e superfícies curvas).
+- O vídeo e a máscara (PNG ou desenhada) deformam-se juntos.
+- Mudar a grelha no painel repõe os pontos na grelha direita.
+
+Uma layer com mesh (mais de 1×1) é desenhada num `<canvas>` WebGL (o vídeo e a máscara são texturas), em
+`public/shared/mesh.js`; o `matrix3d` e o `mask-image` CSS deixam de ser usados nessa layer. Os FX e o modo de mistura
+continuam a funcionar. O Chromium limita-se a ~16 contextos WebGL ativos: usa mesh só nas layers que precisam.
+Sem WebGL, a layer volta ao corner pin.
 
 ## Operações
 
@@ -103,7 +135,7 @@ este o formato das mensagens do painel (Fase 3).
 | `duplicateLayer` | `id` | Copia para logo acima do original, com id novo e deslocada 40 px. |
 | `moveLayer` | `id`, `index` | Reordena (0 = fundo). |
 | `updateLayer` | `id`, `patch` | Altera só os campos permitidos (nunca o `id`). |
-| `setOutput` | `width`, `height` | Muda a resolução e escala `x`, `y`, `scale` e `pins` para manter a composição. |
+| `setOutput` | `width`, `height` | Muda a resolução e escala `x`, `y`, `scale`, `pins` e os pontos da `mesh` para manter a composição. |
 | `setConvert` | `width`, `height`, `fps`, `process` | Definições da conversão no upload (tamanho 64 a 4096). |
 | `setSplash` | `enabled` | Liga/desliga o ecrã do QR code. |
 | `setPin` | `pin` | 4 a 8 dígitos; `""` remove o PIN. |

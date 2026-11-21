@@ -7,8 +7,12 @@
  *   1. vídeo dentro da caixa (cover × videoScale, videoOffsetX/Y)   2. máscara no espaço da layer (maskScale)
  *   3. posição, escala e rotação da layer (x,y = centro)             4. corner pin final (pins[i])
  *   5. espelho X/Y (mirrorX, mirrorY): vira o resultado dentro do quadrilátero final
+ *   6. mesh (opcional, ver mesh.js): com mais de 1 × 1 células, ajusta cada ponto da grelha por cima do corner pin
  */
 const Geometry = (() => {
+  // Layer de cor sólida (source = 'color'): sem máscara, a caixa tem este tamanho; a cor enche sempre a caixa toda.
+  const COLOR_SIZE = [1920, 1080];
+  const isColor = c => !!c && c.source === 'color';
   // Homografia que leva o retângulo (0,0,w,h) para o quadrilátero dst (TL, TR, BR, BL).
   function homography(w, h, dst) {
     const src = [[0, 0], [w, 0], [w, h], [0, h]];
@@ -49,8 +53,9 @@ const Geometry = (() => {
   // vid = [largura, altura] nativas do vídeo.
   function compute(c, box, vid) {
     const [vw, vh] = box;
+    const color = isColor(c);                                               // cor sólida: enche a caixa (sem cover, escala nem offset do vídeo)
     const cover = Math.max(vw / vid[0], vh / vid[1]) * c.videoScale;       // "cover": enche a caixa sem deformar
-    const vidW = vid[0] * cover, vidH = vid[1] * cover;
+    const vidW = color ? vw : vid[0] * cover, vidH = color ? vh : vid[1] * cover;
     const half = [[-vw / 2, -vh / 2], [vw / 2, -vh / 2], [vw / 2, vh / 2], [-vw / 2, vh / 2]];
     const th = (c.rotation || 0) * Math.PI / 180, cos = Math.cos(th), sin = Math.sin(th);   // rotação em torno do centro (graus, sentido horário)
     const base = half.map(([px, py]) => {                                                  // sem corner pin
@@ -63,9 +68,11 @@ const Geometry = (() => {
     const P = pinned;
     const dst = c.mirrorX && c.mirrorY ? [P[2], P[3], P[0], P[1]] : c.mirrorX ? [P[1], P[0], P[3], P[2]] : c.mirrorY ? [P[3], P[2], P[1], P[0]] : P;
     const m = homography(vw, vh, dst);
+    const meshed = !!(c.mesh && typeof Mesh !== 'undefined' && Mesh.active(c.mesh) && Mesh.usable());   // desenhada em WebGL
     return {
+      meshed, meshData: meshed ? c.mesh : null,
       box: { width: vw, height: vh },
-      video: { width: vidW, height: vidH, left: (vw - vidW) / 2 + c.videoOffsetX, top: (vh - vidH) / 2 + c.videoOffsetY },
+      video: color ? { width: vw, height: vh, left: 0, top: 0 } : { width: vidW, height: vidH, left: (vw - vidW) / 2 + c.videoOffsetX, top: (vh - vidH) / 2 + c.videoOffsetY },
       maskSize: c.maskScale * 100 + '%',
       transform: `matrix3d(${m[0]},${m[3]},0,${m[6]},${m[1]},${m[4]},0,${m[7]},0,0,1,0,${m[2]},${m[5]},0,1)`,
       base, pinned, m,
@@ -76,17 +83,26 @@ const Geometry = (() => {
   // A máscara está centrada na caixa e escalada por maskScale; depois aplica-se a homografia da layer.
   function toScreen(g, c, [x, y]) {
     const W = g.box.width, H = g.box.height, k = c.maskScale;
-    return mapPoint(g.m, W / 2 + (x - W / 2) * k, H / 2 + (y - H / 2) * k);
+    const bx = W / 2 + (x - W / 2) * k, by = H / 2 + (y - H / 2) * k;
+    return g.meshed ? Mesh.eval(g, g.meshData, bx / W, by / H) : mapPoint(g.m, bx, by);
   }
   function toMask(g, c, [x, y]) {
     const W = g.box.width, H = g.box.height, k = c.maskScale;
-    const [bx, by] = mapPoint(g.inv || (g.inv = invert(g.m)), x, y);
+    const [bx, by] = g.meshed ? Mesh.inverse(g, g.meshData, x, y) : mapPoint(g.inv || (g.inv = invert(g.m)), x, y);
     return [W / 2 + (bx - W / 2) / k, H / 2 + (by - H / 2) / k];
   }
 
   // Aplica a geometria a um elemento-caixa (.layer) e aos elementos de média (vídeos ou miniaturas) lá dentro.
-  function apply(boxEl, mediaEls, c, box, vid) {
+  // out = [largura, altura] da saída. Com mesh (g.meshed) a layer ocupa a saída toda, sem transform nem máscara CSS
+  // (a máscara e o vídeo passam a ser texturas): quem chama desenha-a com Mesh.view().
+  function apply(boxEl, mediaEls, c, box, vid, out) {
     const g = compute(c, box, vid);
+    boxEl.classList.toggle('meshed', g.meshed);
+    if (g.meshed) {
+      boxEl.style.width = out[0] + 'px'; boxEl.style.height = out[1] + 'px';
+      boxEl.style.transform = 'none';
+      return g;
+    }
     boxEl.style.width = g.box.width + 'px';
     boxEl.style.height = g.box.height + 'px';
     for (const el of mediaEls) {
@@ -100,5 +116,5 @@ const Geometry = (() => {
     return g;
   }
 
-  return { homography, mapPoint, invert, compute, apply, toScreen, toMask };
+  return { COLOR_SIZE, isColor, homography, mapPoint, invert, compute, apply, toScreen, toMask };
 })();

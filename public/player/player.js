@@ -9,6 +9,8 @@
  *   3. A layer é posicionada no ecrã: x,y = centro da caixa; scale = escala em torno do centro.
  *   4. Corner pin final: cada canto da caixa já posicionada é deslocado (pins[i], em píxeis de saída).
  * Os passos 3 e 4 resumem-se a uma única homografia (matrix3d) da caixa para o quadrilátero final.
+ * Layers com mesh (mais de 1 x 1 células, ver shared/mesh.js) são desenhadas num <canvas> WebGL: o vídeo e a máscara são texturas.
+ * Layers de cor sólida (source = 'color') têm um <div> com a cor em vez dos vídeos (que ficam sem ficheiro).
  */
 (() => {
   const params = new URLSearchParams(location.search);
@@ -27,18 +29,32 @@
 
   // ---------- geometria (partilhada com o painel: /shared/geometry.js) ----------
   function applyGeometry(L) {
-    if (!L.vw || !L.vh) return;                              // metadados do vídeo ainda não disponíveis
-    let box = [L.vw, L.vh];                                  // sem máscara: a caixa é o vídeo
+    const color = Geometry.isColor(L.cfg);                   // cor sólida: não há vídeo, a caixa por omissão tem tamanho fixo
+    const vid = color ? Geometry.COLOR_SIZE : [L.vw, L.vh];
+    if (!vid[0] || !vid[1]) return;                          // metadados do vídeo ainda não disponíveis
+    let box = vid;                                           // sem máscara: a caixa é o vídeo
     if (L.cfg.vmask) box = [L.cfg.vmask.width, L.cfg.vmask.height];   // máscara desenhada: tamanho próprio
     else if (L.cfg.mask) {                                        // com máscara: é ela que define a caixa
       if (L.mw) box = [L.mw, L.mh];
       else if (!L.maskFailed) return;                        // ainda a carregar a máscara
     }
-    Geometry.apply(L.el, L.videos, L.cfg, box, [L.vw, L.vh]);
+    const out = [cfg.output.width, cfg.output.height];
+    const g = Geometry.apply(L.el, color ? [L.solid] : L.videos, L.cfg, box, vid, out);
+    if (g.meshed) {                                          // mesh: WebGL em vez de matrix3d + mask-image
+      if (!L.mv) L.mv = Mesh.view(L.el);
+      if (!L.mv) return applyGeometry(L);                    // sem WebGL: volta ao corner pin
+      const c = L.cfg, vm = c.vmask ? VMask.toDataUrl(c.vmask) : null;
+      L.mv.update({ c, g, out, media: color ? solidCanvas(L) : L.video, maskKey: vm || c.mask || '', maskUrl: vm || (c.mask ? mediaUrl(c.mask) : null) });
+    } else if (L.mv) { L.mv.destroy(); L.mv = null; }
   }
 
   // ---------- layers ----------
   const mediaUrl = name => '/media/' + encodeURIComponent(name);
+  // Textura da cor sólida para layers com mesh (refeita só quando a cor muda).
+  function solidCanvas(L) {
+    if (!L.solidCv || L.solidCv.dataset.color !== L.cfg.color) { L.solidCv = Mesh.solid(L.cfg.color); L.solidCv.dataset.color = L.cfg.color; }
+    return L.solidCv;
+  }
 
   // Loop sem salto: cada layer tem dois <video> com o mesmo ficheiro. O ativo toca; pouco antes do fim,
   // o outro (já em 0 e com o 1.º frame descodificado) começa a tocar e, assim que apresenta um frame novo,
@@ -67,8 +83,11 @@
     const videos = [makeVideo(), makeVideo()];
     videos.forEach(v => el.appendChild(v));
     videos[0].style.opacity = 1;
+    const solid = document.createElement('div');             // cor sólida (source = 'color')
+    solid.className = 'solid'; solid.hidden = true;
+    el.appendChild(solid);
     stage.appendChild(el);
-    const L = { id, el, videos, cur: 0, rate: 1, starting: false, cfg: null, vw: 0, vh: 0, srcName: null, maskKey: null,
+    const L = { id, el, videos, solid, solidCv: null, cur: 0, mv: null, rate: 1, starting: false, cfg: null, vw: 0, vh: 0, srcName: null, maskKey: null,
                 wraps: [], lastNow: 0, lastShown: 0, frames: 0, get video() { return this.videos[this.cur]; } };
 
     const standby = () => videos[L.cur ^ 1];
@@ -85,6 +104,7 @@
       L.lastShown = now;
       old.pause(); try { old.currentTime = 0; } catch {}  // prepara-o como próximo
       L.cur ^= 1; L.starting = false;
+      if (L.mv) L.mv.frame(nxt);
     };
 
     videos.forEach((v, i) => {
@@ -99,6 +119,7 @@
         if (i === L.cur) {
           L.frames++; L.lastNow = now;
           L.lastShown = now;
+          if (L.mv) L.mv.frame(v);                           // layer com mesh: copia o frame novo para a textura
           if (v.duration && v.duration - meta.mediaTime <= leadFor(L)) startStandby();
         } else if (L.starting && meta.mediaTime > 0) {
           swap(now);
@@ -116,15 +137,19 @@
     L.rate = c.speed || 1; setRate(L);
     FX.apply(L.el, c);                                       // filtros, opacidade e modo de mistura
 
-    if (L.srcName !== c.video) {                             // só reinicia o vídeo se o ficheiro mudou
-      L.srcName = c.video; L.vw = L.vh = 0; L.starting = false; L.cur = 0;
+    const color = Geometry.isColor(c);
+    const vidName = color ? null : c.video;                  // cor sólida: os vídeos ficam sem ficheiro (não gastam CPU)
+    L.solid.hidden = !color;
+    if (color) L.solid.style.background = c.color;
+    if (L.srcName !== vidName) {                             // só reinicia o vídeo se o ficheiro mudou
+      L.srcName = vidName; L.vw = L.vh = 0; L.starting = false; L.cur = 0;
       const [main, spare] = L.videos;
       main.style.opacity = 1; spare.style.opacity = 0;
       spare.removeAttribute('src'); spare.load();
-      if (c.video) main.src = mediaUrl(c.video); else main.removeAttribute('src');
+      if (vidName) main.src = mediaUrl(vidName); else main.removeAttribute('src');
       main.load();
       // A reserva carrega depois, escalonada por layer, para não sobrecarregar o arranque.
-      const name = c.video;
+      const name = vidName;
       if (name) setTimeout(() => { if (L.srcName === name) { spare.src = mediaUrl(name); spare.load(); } }, 1200 + index * 400);
     }
     // A máscara desenhada (vmask) substitui o PNG. A chave muda quando qualquer uma delas muda.
@@ -147,7 +172,7 @@
 
     // Layer escondida: pausa para poupar CPU. Ao mostrar, retoma.
     L.el.style.visibility = c.visible ? 'visible' : 'hidden';
-    if (c.visible && c.video) { if (L.video.paused && !L.starting && !halted) L.video.play().catch(() => {}); }
+    if (c.visible && vidName) { if (L.video.paused && !L.starting && !halted) L.video.play().catch(() => {}); }
     else { L.videos.forEach(v => { if (!v.paused) v.pause(); }); L.starting = false; }
   }
 
@@ -156,7 +181,7 @@
     halted = !!on;
     for (const L of layers.values()) {
       if (halted) { L.starting = false; const sb = L.videos[L.cur ^ 1]; L.videos.forEach(v => v.pause()); try { sb.currentTime = 0; } catch {} }
-      else if (L.cfg && L.cfg.visible && L.cfg.video && L.video.paused) L.video.play().catch(() => {});
+      else if (L.cfg && L.cfg.visible && L.srcName && L.video.paused) L.video.play().catch(() => {});
     }
   }
 
@@ -168,7 +193,7 @@
 
     const ids = new Set(cfg.layers.map(l => l.id));
     for (const [id, L] of layers) if (!ids.has(id)) {          // layers removidas
-      L.videos.forEach(v => { v.pause(); v.removeAttribute('src'); v.load(); }); L.el.remove(); layers.delete(id);
+      L.videos.forEach(v => { v.pause(); v.removeAttribute('src'); v.load(); }); if (L.mv) L.mv.destroy(); L.el.remove(); layers.delete(id);
     }
     cfg.layers.forEach((c, i) => {
       let L = layers.get(c.id);
@@ -204,7 +229,7 @@
     editSvg.appendChild(cursorEl); placeCursor();
     editSvg.setAttribute('width', cfg.output.width); editSvg.setAttribute('height', cfg.output.height);
     const L = layers.get(c.id);
-    const g = Geometry.compute(c, [c.vmask.width, c.vmask.height], L && L.vw ? [L.vw, L.vh] : [c.vmask.width, c.vmask.height]);
+    const g = Geometry.compute(c, [c.vmask.width, c.vmask.height], Geometry.isColor(c) ? Geometry.COLOR_SIZE : L && L.vw ? [L.vw, L.vh] : [c.vmask.width, c.vmask.height]);
     const add = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); editSvg.appendChild(e); };
     add('polygon', { points: g.pinned.map(p => p.join(',')).join(' '), fill: 'none', stroke: '#fff', 'stroke-opacity': .5, 'stroke-width': 2, 'stroke-dasharray': '10 8' });
     c.vmask.shapes.forEach((s, i) => {

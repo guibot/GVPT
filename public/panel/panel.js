@@ -43,7 +43,8 @@
   const maskPreviewCss = u => h('i', { style: `-webkit-mask-image:${u};mask-image:${u}` });
   const layerMaskCss = l => l.vmask ? VMask.cssUrl(l.vmask) : l.mask ? `url("${maskUrl(l.mask)}")` : 'none';   // a desenhada substitui o PNG
   // vidDims: tamanho do vídeo; boxDims: tamanho da caixa (a máscara manda; sem máscara, o vídeo).
-  const vidDims = l => { const m = mediaByName(l.video); return m && m.width ? [m.width, m.height] : [640, 480]; };
+  const isColor = l => Geometry.isColor(l);       // layer de cor sólida (source = 'color')
+  const vidDims = l => { if (isColor(l)) return Geometry.COLOR_SIZE; const m = mediaByName(l.video); return m && m.width ? [m.width, m.height] : [640, 480]; };
   const boxDims = l => {
     if (l.vmask) return [l.vmask.width, l.vmask.height];
     const m = l.mask && mediaByName(l.mask); return m && m.width ? [m.width, m.height] : vidDims(l);
@@ -153,18 +154,18 @@
   function renderList() {
     if (reorder) { reorder.stale = true; return; }          // não reconstruir a lista a meio de um arrasto
     const ul = $('#layer-list');
-    const sig = JSON.stringify([cfg.layers.map(l => [l.id, l.name, l.visible, l.locked, l.video, l.mask, l.vmask, FX.badge(l)]), sel, mediaSig()]);
+    const sig = JSON.stringify([cfg.layers.map(l => [l.id, l.name, l.visible, l.locked, l.source, l.color, l.video, l.mask, l.vmask, FX.badge(l)]), sel, mediaSig()]);
     if (sig === listSig) return;
     listSig = sig;
     ul.textContent = '';
     if (!cfg.layers.length) ul.append(h('li', { class: 'empty', text: 'No layers yet.' }));
     // O topo da lista é a layer de cima (último do array).
     [...cfg.layers].map((l, i) => [l, i]).reverse().forEach(([l, i]) => {
-      const m = mediaByName(l.video);
+      const m = isColor(l) ? null : mediaByName(l.video);
       const li = h('li', { class: 'li' + (l.id === sel ? ' sel' : '') + (l.visible ? '' : ' hidden-layer') + (l.locked ? ' locked' : '') },
         h('div', { class: 'li-main', onclick: () => select(l.id) },
           h('div', { class: 'li-grip', title: 'Drag to reorder', 'aria-label': 'Drag to reorder', text: '⋮⋮', onpointerdown: e => startReorder(e, l.id) }),
-          h('div', { class: 'li-thumb', style: m ? `background-image:url("${thumbUrl(m)}")` : '' }),
+          h('div', { class: 'li-thumb', style: isColor(l) ? `background:${l.color}` : m ? `background-image:url("${thumbUrl(m)}")` : '' }),
           l.vmask || l.mask ? h('div', { class: 'li-mask', title: l.vmask ? 'drawn mask' : l.mask }, maskPreviewCss(layerMaskCss(l))) : null,
           h('div', { class: 'li-name', text: l.name }),
           FX.badge(l) ? h('span', { class: 'li-fx', title: 'This layer has speed or FX applied', text: FX.badge(l) }) : null,
@@ -226,7 +227,7 @@
   function select(id) { if (id !== sel) editor.stop(); sel = id; renderAll(); }
 
   // ---------- propriedades ----------
-  const LIM = { rotation: [-360, 360], scale: [0.01, 20], maskScale: [0.01, 20], videoScale: [0.01, 20], videoOffset: [-5000, 5000], xy: [-10000, 10000], pin: [-3000, 3000] };
+  const LIM = { rotation: [-360, 360], scale: [0.01, 20], maskScale: [0.01, 20], videoScale: [0.01, 20], videoOffset: [-5000, 5000], xy: [-10000, 10000], pin: [-3000, 3000], meshPt: [-3000, 3000] };
   let propsKey = '';
   let rows = [];                  // controlos numéricos, para sincronizar valores
   const selects = [];             // [{el, key}]
@@ -367,8 +368,8 @@
   // (uma cópia antiga, só com a vmask, também serve).
   const maskClip = clipStore('maskClip', v => (v && v.shapes ? { vmask: v } : v));
   // Layer copiada: todos os parâmetros (menos o id e o locked). Cola-se como layer nova ou por cima da selecionada.
-  const LAYER_FIELDS = ['name', 'visible', 'video', 'mask', 'vmask', 'maskScale', 'maskMode', 'videoScale', 'videoOffsetX',
-    'videoOffsetY', 'x', 'y', 'scale', 'rotation', 'pins', 'speed', 'fx', 'mirrorX', 'mirrorY'];
+  const LAYER_FIELDS = ['name', 'visible', 'source', 'color', 'video', 'mask', 'vmask', 'maskScale', 'maskMode', 'videoScale', 'videoOffsetX',
+    'videoOffsetY', 'x', 'y', 'scale', 'rotation', 'pins', 'speed', 'fx', 'mirrorX', 'mirrorY', 'mesh'];
   const layerClip = clipStore('layerClip');
   const layerParams = l => Object.fromEntries(LAYER_FIELDS.filter(k => k in l).map(k => [k, l[k]]));
   function pasteLayerNew() {
@@ -400,7 +401,34 @@
     name.addEventListener('input', () => patch({ name: name.value || 'Layer' }));
     selects.push(() => { if (document.activeElement !== name) name.value = L().name; });
 
+    // Fonte da layer: vídeo (ficheiro) ou cor sólida. Ao trocar, o vídeo escolhido fica guardado para voltar a ele.
+    const srcSeg = seg([['video', 'VIDEO'], ['color', 'SOLID COLOR']], () => L().source || 'video', v => { patch({ source: v }); scheduleProps(); });
+    const colorIn = h('input', { type: 'color', 'aria-label': 'Color' });
+    const colorHex = h('input', { type: 'text', maxlength: 7, autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Color (hex)' });
+    colorIn.addEventListener('input', () => patch({ color: colorIn.value }));
+    colorHex.addEventListener('input', () => {
+      let v = colorHex.value.trim().toLowerCase(); if (v && v[0] !== '#') v = '#' + v;
+      if (/^#[0-9a-f]{3}$/.test(v)) v = '#' + [...v.slice(1)].map(ch => ch + ch).join('');
+      const ok = /^#[0-9a-f]{6}$/.test(v); colorHex.classList.toggle('bad', !ok);
+      if (ok) patch({ color: v });
+    });
+    colorHex.addEventListener('blur', () => { colorHex.classList.remove('bad'); colorHex.value = L().color; });
+    colorHex.addEventListener('keydown', e => { if (e.key === 'Enter') colorHex.blur(); });
+    selects.push(() => { const c = L().color; if (document.activeElement !== colorIn) colorIn.value = c; if (document.activeElement !== colorHex) colorHex.value = c; });
+    const SWATCHES = ['#ffffff', '#000000', '#ff0000', '#00ff00', '#0000ff', '#ffff00', '#00ffff', '#ff00ff'];
+    const swatches = h('div', { class: 'swatches' }, SWATCHES.map(c => h('button', { type: 'button', class: 'sw', style: `background:${c}`, title: c, 'aria-label': c, onclick: () => patch({ color: c }) })));
+    const colorField = h('div', { class: 'field' }, 'COLOR', h('div', { class: 'color-row' }, colorIn, colorHex), swatches);
+
     const modeSeg = seg([['alpha', 'ALPHA'], ['luminance', 'LUMINANCE']], () => L().maskMode, v => patch({ maskMode: v }));
+    // Mesh: grelha de células (colunas × linhas). Mudar de grelha repõe os pontos na grelha direita.
+    const gridSel = h('select', { 'aria-label': 'Mesh grid' }, Mesh.PRESETS.map(([c, r]) =>
+      h('option', { value: `${c}x${r}`, text: `${c} × ${r}` + (c === 1 && r === 1 ? '  (corner pin)' : '') })));
+    gridSel.addEventListener('change', () => {
+      const [c, r] = gridSel.value.split('x').map(Number), m = L().mesh;
+      if (Mesh.dirty(m) && !confirm('Changing the grid puts the mesh points back on the straight grid. Continue?')) { gridSel.value = `${m.cols}x${m.rows}`; return; }
+      patch({ mesh: Mesh.flat(c, r, m.smooth) }); scheduleProps();
+    });
+    selects.push(() => { if (document.activeElement !== gridSel) gridSel.value = `${L().mesh.cols}x${L().mesh.rows}`; });
     const PIN_NAMES = ['TOP LEFT', 'TOP RIGHT', 'BOTTOM RIGHT', 'BOTTOM LEFT'];
 
     box.append(
@@ -416,7 +444,8 @@
             editor.stop(); patch(c); toast('Layer pasted'); scheduleProps();
           } }) : null),
         h('label', { class: 'field' }, 'NAME', name),
-        mediaSelect('VIDEO', 'video', 'video'),
+        h('div', { class: 'field' }, 'SOURCE', srcSeg),
+        isColor(l) ? colorField : mediaSelect('VIDEO', 'video', 'video'),
         mediaSelect('MASK', 'mask', 'mask')),
       group(transformTitle,
         g2(numRow('X', [0, W], LIM.xy, 1, () => L().x, v => patch({ x: v })),
@@ -449,10 +478,17 @@
           } }) : null),
         l.vmask && l.mask ? h('p', { class: 'hint', text: 'The drawn mask replaces the PNG chosen above.' }) : null,
         numRow('Scale', [0.1, 5], LIM.maskScale, 0.01, () => L().maskScale, v => patch({ maskScale: v }))),
-      group('Video',
+      isColor(l) ? '' : group('Video',                       // ('' e não null: append() escreveria "null")
         g2(numRow('Offset X', [-500, 500], LIM.videoOffset, 1, () => L().videoOffsetX, v => patch({ videoOffsetX: v })),
            numRow('Offset Y', [-500, 500], LIM.videoOffset, 1, () => L().videoOffsetY, v => patch({ videoOffsetY: v }))),
         numRow('Scale', [0.1, 5], LIM.videoScale, 0.01, () => L().videoScale, v => patch({ videoScale: v }))),
+      group('Mesh',
+        h('div', { class: 'nf sel' }, h('span', { class: 'lb', text: 'Grid' }), gridSel),
+        Mesh.active(l.mesh) ? h('div', { class: 'row-btns tight' },
+          toggle('Smooth', () => !!L().mesh.smooth, v => patch({ mesh: { ...L().mesh, smooth: v } })),
+          h('button', { type: 'button', text: 'Reset mesh', title: 'Put all the mesh points back on the straight grid (the corners stay as they are)',
+            onclick: () => { const m = L().mesh; patch({ mesh: Mesh.flat(m.cols, m.rows, m.smooth) }); } })) : null,
+        h('p', { class: 'hint', text: Mesh.active(l.mesh) ? 'Drag the extra points in the preview. The 4 corners are the corner pin below.' : '1 × 1 is the plain corner pin. Pick more cells to get a mesh.' })),
       group('Corner pin (px)',
         h('div', { class: 'pins' }, PIN_NAMES.map((t, i) =>
           h('div', { class: 'pin-block' }, h('b', { text: t }),
@@ -476,7 +512,7 @@
     const reset = h('button', { type: 'button', text: 'Reset FX', onclick: () => patch({ speed: 1, fx: { ...FX.DEFAULTS, on: L().fx.on } }) });
     const presets = seg([[0.25, '¼'], [0.5, '½'], [1, '1×'], [2, '2×'], [4, '4×']], () => L().speed, v => patch({ speed: v }));
     box.append(
-      group('Playback',
+      isColor(L()) ? '' : group('Playback',                  // cor sólida: não há vídeo a tocar ('' e não null: append() escreveria "null")
         numRow('Speed', [0.1, 4], [0.1, 4], 0.05, () => L().speed, v => patch({ speed: v })),
         presets),
       group('Color',
@@ -498,7 +534,7 @@
   function syncProps(force) {
     if (!cfg) return;
     const l = layerById(sel);
-    const key = [sel, cfg.output.width, mediaSig(), !!(l && l.vmask), !!(l && l.mask)].join('|');
+    const key = [sel, cfg.output.width, mediaSig(), l && l.source, !!(l && l.vmask), !!(l && l.mask), l && l.mesh ? l.mesh.cols + 'x' + l.mesh.rows : ''].join('|');
     if (key !== propsKey && !force) { propsKey = key; buildProps(); return; }
     propsKey = key;
     if (!layerById(sel)) return;
@@ -510,8 +546,10 @@
   const NS = 'http://www.w3.org/2000/svg';
   const overlay = document.createElementNS(NS, 'svg'); overlay.id = 'overlay';
   const poly = document.createElementNS(NS, 'polygon'); overlay.append(poly);
+  const gridPath = document.createElementNS(NS, 'path'); overlay.append(gridPath);     // linhas da mesh
   pstage.append(overlay);
   const handles = [0, 1, 2, 3].map(i => { const e = h('div', { class: 'handle', 'data-i': i }); pstage.append(e); return e; });
+  const mhandles = [];            // pegas dos pontos da mesh (os cantos são as pegas acima)
   const pl = new Map();           // id -> elemento .layer da pré-visualização
   const editor = MaskEditor({
     layer: () => layerById(sel), output: () => cfg.output, boxDims, geo: l => geo(l),
@@ -546,15 +584,26 @@
       if (!e) { e = h('div', { class: 'layer' }); pl.set(l.id, e); pstage.insertBefore(e, overlay); }
       e.style.zIndex = i;
       e.style.display = l.visible ? '' : 'none';
-      const m = mediaByName(l.video);
-      const src = m ? thumbUrl(m) : '';
+      const m = isColor(l) ? null : mediaByName(l.video);
+      const src = isColor(l) ? 'color:' + l.color : m ? thumbUrl(m) : '';
       if (e.dataset.src !== src) {            // miniatura (frame extraído pelo ffmpeg), não vídeo ao vivo
-        e.dataset.src = src; e.textContent = '';
-        e.append(src ? h('img', { src, draggable: 'false', alt: '' }) : h('div', { class: 'ph' }));
+        e.dataset.src = src;
+        if (e._mv) { e._mv.destroy(); e._mv = null; }      // o textContent apaga o canvas da mesh
+        e.textContent = ''; e._solid = null;
+        if (isColor(l)) { e.append(h('div', { style: `background:${l.color}` })); e._solid = Mesh.solid(l.color); }   // cor sólida (e a textura para a mesh)
+        else if (src) { const img = h('img', { src, draggable: 'false', alt: '' }); img.addEventListener('load', scheduleRender); e.append(img); }
+        else e.append(h('div', { class: 'ph' }));
       }
       const mk = layerMaskCss(l);
       if (e.dataset.mask !== mk) { e.dataset.mask = mk; e.style.webkitMaskImage = e.style.maskImage = mk; }
-      Geometry.apply(e, [e.firstChild], l, boxDims(l), vidDims(l));
+      const out = [cfg.output.width, cfg.output.height];
+      const eg = Geometry.apply(e, [e.firstChild], l, boxDims(l), vidDims(l), out);
+      if (eg.meshed) {                        // mesh: a miniatura e a máscara são texturas de um canvas WebGL
+        if (!e._mv) e._mv = Mesh.view(e);
+        if (!e._mv) scheduleRender();         // sem WebGL: volta ao corner pin
+        else e._mv.update({ c: l, g: eg, out, media: e._solid || (e.firstChild && e.firstChild.tagName === 'IMG' ? e.firstChild : null),
+          maskKey: mk, maskUrl: l.vmask ? VMask.toDataUrl(l.vmask) : l.mask ? maskUrl(l.mask) : null });
+      } else if (e._mv) { e._mv.destroy(); e._mv = null; }
       FX.apply(e, l);
     });
     // contorno e pegas da layer selecionada
@@ -563,7 +612,7 @@
     handles.forEach(e => { e.style.zIndex = 1001; e.style.display = l && !l.locked && !editor.active && editState.editing ? '' : 'none'; });   // a desenhar: sem pegas de canto
     poly.style.display = l ? '' : 'none';
     editor.render();
-    if (!l) return;
+    if (!l) { gridPath.style.display = 'none'; mhandles.forEach(e => { e.style.display = 'none'; }); return; }
     const g = geo(l);
     poly.setAttribute('points', g.pinned.map(p => p.join(',')).join(' '));
     poly.setAttribute('fill', 'none'); poly.setAttribute('stroke', '#8fb3e6'); poly.setAttribute('stroke-width', 2 / scale);
@@ -572,6 +621,22 @@
     handles.forEach((e, i) => {
       e.style.width = e.style.height = hs + 'px';
       e.style.left = g.pinned[i][0] + 'px'; e.style.top = g.pinned[i][1] + 'px';
+    });
+    // mesh: linhas da grelha e pegas dos pontos que não são cantos
+    const free = g.meshed ? Mesh.freePoints(l.mesh) : [];
+    gridPath.style.display = g.meshed ? '' : 'none';
+    if (g.meshed) {
+      gridPath.setAttribute('d', Mesh.lines(g, l.mesh).map(pl => 'M' + pl.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join('L')).join(''));
+      gridPath.setAttribute('fill', 'none'); gridPath.setAttribute('stroke', '#8fb3e6'); gridPath.setAttribute('stroke-opacity', .7); gridPath.setAttribute('stroke-width', 1.5 / scale);
+    }
+    while (mhandles.length < free.length) { const e = h('div', { class: 'handle mh' }); pstage.append(e); mhandles.push(e); }
+    mhandles.forEach((e, n) => {
+      const k = free[n];
+      if (k === undefined || l.locked || editor.active || !editState.editing) { e.style.display = 'none'; return; }
+      const p = Mesh.pointByIndex(g, l.mesh, k);
+      e.dataset.k = k; e.style.display = ''; e.style.zIndex = 1001;
+      e.style.width = e.style.height = hs * 0.8 + 'px';
+      e.style.left = p[0] + 'px'; e.style.top = p[1] + 'px';
     });
   }
 
@@ -597,8 +662,14 @@
     const p = point(e), hEl = e.target.closest && e.target.closest('.handle');
     if (hEl) {                                              // arrastar um canto (corner pin)
       const l = layerById(sel); if (!l || l.locked) return;
-      const i = +hEl.dataset.i, g = geo(l);
-      drag = { mode: 'pin', i, grab: [p[0] - g.pinned[i][0], p[1] - g.pinned[i][1]], el: hEl };
+      const g = geo(l);
+      if (hEl.dataset.k !== undefined && g.meshed) {          // ponto da mesh
+        const k = +hEl.dataset.k, at = Mesh.pointByIndex(g, l.mesh, k);
+        drag = { mode: 'mesh', k, grab: [p[0] - at[0], p[1] - at[1]], el: hEl };
+      } else {
+        const i = +hEl.dataset.i;
+        drag = { mode: 'pin', i, grab: [p[0] - g.pinned[i][0], p[1] - g.pinned[i][1]], el: hEl };
+      }
       hEl.classList.add('drag');
     } else {                                                // selecionar / mover a layer
       let l = layerById(sel);
@@ -622,6 +693,12 @@
       const pins = l.pins.map(q => ({ ...q }));
       pins[drag.i] = { x: Math.round(clamp(p[0] - drag.grab[0] - base[0], LIM.pin)), y: Math.round(clamp(p[1] - drag.grab[1] - base[1], LIM.pin)) };
       patchLayer(sel, { pins });
+    } else if (drag.mode === 'mesh') {
+      const g = geo(l); if (!g.meshed) return;
+      const base = Mesh.baseByIndex(g, l.mesh, drag.k);      // onde o ponto estaria sem deslocamento
+      const pts = l.mesh.pts.map(q => ({ ...q }));
+      pts[drag.k] = { x: Math.round(clamp(p[0] - drag.grab[0] - base[0], LIM.meshPt)), y: Math.round(clamp(p[1] - drag.grab[1] - base[1], LIM.meshPt)) };
+      patchLayer(sel, { mesh: { ...l.mesh, pts } });
     } else {
       patchLayer(drag.id, { x: Math.round(clamp(drag.x0 + p[0] - drag.start[0], LIM.xy)), y: Math.round(clamp(drag.y0 + p[1] - drag.start[1], LIM.xy)) });
     }
@@ -852,7 +929,7 @@
   function needSize(m) {
     let w = 0, hh = 0;
     for (const l of cfg ? cfg.layers : []) {
-      if (l.video !== m.name) continue;
+      if (l.video !== m.name || isColor(l)) continue;
       const g = Geometry.compute(l, boxDims(l), vidDims(l));
       w = Math.max(w, g.video.width * l.scale); hh = Math.max(hh, g.video.height * l.scale);
     }

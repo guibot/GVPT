@@ -106,11 +106,15 @@ main > section { overflow: auto; min-height: 0; padding: 12px; }
 #pstage .layer { position: absolute; left: 0; top: 0; overflow: hidden; transform-origin: 0 0; pointer-events: none;
   -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
 #pstage .layer > * { position: absolute; display: block; max-width: none; pointer-events: none; }
+#pstage .layer.meshed { -webkit-mask-image: none !important; mask-image: none !important; }
+#pstage .layer.meshed > :not(canvas) { display: none !important; }   /* a miniatura é a textura do <canvas> da mesh */
 #pstage .layer .ph { background: repeating-linear-gradient(45deg, #232a36, #232a36 12px, #1a1f29 12px, #1a1f29 24px); }
 #overlay { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .handle { position: absolute; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 0 0 1px #0008;
   transform: translate(-50%, -50%); touch-action: none; cursor: grab; }
 .handle.drag { background: #fff; border-color: var(--accent); }
+.handle.mh { background: var(--bg); border-color: var(--accent); }              /* pontos da mesh (os cantos são as pegas do corner pin) */
+.handle.mh.drag { background: #fff; }
 #preview-wrap { position: relative; }
 #debug { position: absolute; left: 0; top: 0; z-index: 5; padding: 5px 9px; background: rgba(17, 20, 27, .82); border: 1px solid var(--border2); border-radius: 7px;
   font: 11px/1.5 var(--mono); color: var(--text2); white-space: pre; pointer-events: none; }
@@ -364,3 +368,13 @@ button.pick[aria-expanded="true"] { border-color: var(--accent); }
 .field.pk { grid-template-columns: minmax(0, 1fr); }
 .pick-wrap, button.pick { min-width: 0; }
 button.pick { overflow: hidden; }
+
+/* Fonte de cor sólida: seletor de cor + código hex + cores rápidas */
+.color-row { display: grid; grid-template-columns: var(--h) minmax(0, 1fr); gap: 6px; }
+.color-row input[type=color] { width: var(--h); height: var(--h); padding: 2px; background: var(--surface2); border: 1px solid var(--border); border-radius: 7px; cursor: pointer; }
+.color-row input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+.color-row input[type=color]::-webkit-color-swatch { border: 0; border-radius: 4px; }
+.color-row input[type=text] { font-family: var(--mono); text-transform: lowercase; }
+.color-row input.bad { border-color: var(--danger, #e5484d); }
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.swatches .sw { width: 22px; height: 22px; min-width: 0; padding: 0; border: 1px solid var(--border2); border-radius: 5px; }

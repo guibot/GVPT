@@ -74,8 +74,10 @@ The addresses (`localhost:8080` and the network one) and a QR code also show on 
 - **RUN / EDIT** (top bar): **RUN** only watches the output (layers and properties are hidden, nothing can be dragged by accident). **EDIT**
   unlocks everything. EDIT turns itself off after 5 minutes without activity, or when the last panel disconnects. It always starts in RUN.
 - **Layers**: add, duplicate, delete, reorder, show/hide and **lock** (a locked layer cannot be picked or moved in the preview).
+- **Source**: each layer shows a **video** or a **solid color** (color picker, hex code or quick swatches). The solid color fills the layer box (1920×1080, or the mask's size) and takes masks, transform, corner pin, mesh and FX like a video. Switching back to Video keeps the video that was chosen before.
 - **Layer Transform**: X, Y, Scale and **Rotate**. The title shows the layer's current size on screen.
 - **Preview**: drag a layer to move it, drag its 4 handles for the corner pin.
+- **Mesh**: besides the corner pin, pick a grid from 1×1 (plain corner pin) to 4×4 cells and drag the extra points to bend the layer (video and mask together). **Smooth** curves the edges between cells; off keeps them straight. Layers with a mesh are drawn with WebGL (Chromium allows about 16 at once).
 - **Media** (library, upload and conversion):
   - Upload by file picker or drag and drop. Videos are converted automatically (H.264, constant fps, no audio, HDR to SDR). PNGs become masks.
   - **Maximum size per upload**: choose landscape or portrait presets, or a custom size (64 to 4096). The video is scaled down to fit, never enlarged;
@@ -203,8 +205,10 @@ Os endereços (`localhost:8080` e o da rede) e um QR code aparecem também no ec
 - **RUN / EDIT** (barra de cima): **RUN** só observa o output (layers e propriedades escondidas, nada se arrasta por engano). **EDIT** liberta tudo.
   O EDIT desliga sozinho após 5 minutos sem atividade, ou quando o último painel se desliga. Arranca sempre em RUN.
 - **Layers**: adicionar, duplicar, apagar, reordenar, mostrar/esconder e **bloquear** (uma layer bloqueada não se escolhe nem se move na pré-visualização).
+- **Source**: cada layer mostra um **vídeo** ou uma **cor sólida** (seletor de cor, código hex ou cores rápidas). A cor enche a caixa da layer (1920×1080, ou o tamanho da máscara) e aceita máscaras, transform, corner pin, mesh e FX tal como um vídeo. Ao voltar a Video, retoma o vídeo que estava escolhido.
 - **Layer Transform**: X, Y, Scale e **Rotate**. O título mostra o tamanho atual da layer no ecrã.
 - **Pré-visualização**: arrasta uma layer para a mover e as 4 pegas para o corner pin.
+- **Mesh**: além do corner pin, escolhe uma grelha de 1×1 (corner pin normal) a 4×4 células e arrasta os pontos extra para dobrar a layer (vídeo e máscara em conjunto). **Smooth** curva as arestas entre células; desligado, ficam retas. As layers com mesh são desenhadas com WebGL (o Chromium aguenta cerca de 16 ao mesmo tempo).
 - **Media** (biblioteca, envio e conversão):
   - Envio pelo seletor de ficheiros ou arrastando. Os vídeos são convertidos sozinhos (H.264, fps constante, sem áudio, HDR para SDR). Os PNGs passam a máscaras.
   - **Tamanho máximo por envio**: tamanhos em paisagem ou retrato, ou um tamanho à escolha (64 a 4096). O vídeo encolhe para caber, nunca é ampliado;

@@ -38,7 +38,7 @@ const FX = (() => {
   // Texto curto para a lista de layers: velocidade e/ou "FX" quando há efeitos ativos.
   function badge(c) {
     const out = [];
-    if (c.speed && c.speed !== 1) out.push(`${+c.speed.toFixed(2)}x`);
+    if (c.source !== 'color' && c.speed && c.speed !== 1) out.push(`${+c.speed.toFixed(2)}x`);
     const fx = get(c);
     if (fx.on && dirty(fx)) out.push('FX');
     return out.join(' ');
