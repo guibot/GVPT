@@ -378,3 +378,8 @@ button.pick { overflow: hidden; }
 .color-row input.bad { border-color: var(--danger, #e5484d); }
 .swatches { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .swatches .sw { width: 22px; height: 22px; min-width: 0; padding: 0; border: 1px solid var(--border2); border-radius: 5px; }
+
+/* Glitch: por efeito, um botão ON/OFF e a barra da intensidade (esbatida quando o efeito está desligado) */
+.gl-row { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 6px; }
+.gl-row button.gl-on { padding: 0; font-size: 11px; }
+.gl-row.off .nf { opacity: .45; }

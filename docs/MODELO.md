@@ -48,6 +48,7 @@ e `server/lib/config.js` (gravação em disco). O player desenha em `public/play
 | `scale` | 1 | 0,01 a 20 | Escala da layer, em torno do seu centro. |
 | `rotation` | 0 | ±360 | Rotação da layer em graus, sentido horário, em torno do centro. |
 | `pins` | 4×`{0,0}` | ±3000 | Corner pin: deslocamento de cada canto, em píxeis de saída. Ordem: TL, TR, BR, BL. |
+| `glitch` | tudo desligado | ver "Glitch" | Efeitos glitch por layer (stutter, jitter, slices, RGB, noise, roll), cada um com ON/OFF e intensidade. |
 | `mesh` | 1×1 | ver abaixo | Grelha de pontos por cima do corner pin. 1×1 = só corner pin. |
 
 Valores fora dos limites são cortados; valores inválidos voltam ao padrão. Nomes de ficheiro com `/`, `\` ou
@@ -175,6 +176,32 @@ Cada layer tem `speed` (0.1–4, 1 = normal) e um objeto `fx`:
 - **FX**: filtros CSS, `opacity` e `mix-blend-mode` no elemento da layer. Aplicam-se antes da máscara (um blur fica recortado por ela) e
   antes da transformação final. Em tempo real, sem reconverter vídeos. `fx.on = false` ignora os efeitos sem perder os valores.
 - A pré-visualização do painel aplica os mesmos efeitos às miniaturas (a velocidade só se vê no player).
+
+### Glitch (`glitch`)
+
+```json
+{ "stutter": { "on": false, "intensity": 50 }, "jitter": { "on": true, "intensity": 30 }, "slices": { "on": false, "intensity": 50 },
+  "rgb": { "on": true, "intensity": 80 }, "noise": { "on": false, "intensity": 50 }, "roll": { "on": false, "intensity": 50 } }
+```
+
+Efeitos desenhados em canvas 2D (`public/shared/glitch.js`, vindos do projeto AliciaOla). Cada efeito tem o seu interruptor
+`on` (por omissão desligado) e a sua `intensity` (0 a 100, padrão 50). O formato antigo (booleanos e uma `intensity`
+partilhada) é convertido ao ler. As rajadas do `rgb` e do `slices` partilham o mesmo ritmo, dado pela maior das duas intensidades.
+
+| Efeito | O que faz |
+|---|---|
+| `stutter` | Repete em ciclo os últimos 3 a 10 frames (guarda 12, a no máximo 640 de largura). |
+| `jitter` | O frame treme uns píxeis. |
+| `slices` | Faixas horizontais empurradas para o lado, em rajadas curtas. |
+| `rgb` | Os canais vermelho, verde e azul separam-se, em rajadas. |
+| `noise` | Grão e scanlines. |
+| `roll` | A imagem desliza na vertical. |
+
+Com algum ligado (só em layers de vídeo e com `fx.on`), o player desenha o vídeo num `<canvas>` (no máximo 960 de largura)
+com o tamanho e a posição do vídeo na caixa; os `<video>` continuam a descodificar, invisíveis. Tudo o resto (máscara,
+transform, corner pin, mesh, filtros CSS) aplica-se por cima, como num vídeo normal. Um só loop a ~30 fps serve todas as
+layers com glitch e só existe enquanto houver alguma. As zonas que ficam a descoberto (jitter, roll) são transparentes.
+A pré-visualização do painel não mostra o glitch (é uma miniatura parada).
 
 ## Espelho
 

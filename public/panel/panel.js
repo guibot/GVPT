@@ -369,7 +369,7 @@
   const maskClip = clipStore('maskClip', v => (v && v.shapes ? { vmask: v } : v));
   // Layer copiada: todos os parâmetros (menos o id e o locked). Cola-se como layer nova ou por cima da selecionada.
   const LAYER_FIELDS = ['name', 'visible', 'source', 'color', 'video', 'mask', 'vmask', 'maskScale', 'maskMode', 'videoScale', 'videoOffsetX',
-    'videoOffsetY', 'x', 'y', 'scale', 'rotation', 'pins', 'speed', 'fx', 'mirrorX', 'mirrorY', 'mesh'];
+    'videoOffsetY', 'x', 'y', 'scale', 'rotation', 'pins', 'speed', 'fx', 'glitch', 'mirrorX', 'mirrorY', 'mesh'];
   const layerClip = clipStore('layerClip');
   const layerParams = l => Object.fromEntries(LAYER_FIELDS.filter(k => k in l).map(k => [k, l[k]]));
   function pasteLayerNew() {
@@ -507,9 +507,21 @@
     const blend = h('select', { 'aria-label': 'Blend mode' }, FX.BLENDS.map(b => h('option', { value: b, text: b })));
     blend.addEventListener('change', () => fxPatch({ blend: blend.value }));
     selects.push(() => { if (document.activeElement !== blend) blend.value = L().fx.blend; });
-    const bypass = h('button', { type: 'button', title: 'Turn all the FX of this layer off and on (the speed is not affected)', onclick: () => fxPatch({ on: !L().fx.on }) });
+    const bypass = h('button', { type: 'button', title: 'Turn all the FX of this layer off and on, glitch included (the speed is not affected)', onclick: () => fxPatch({ on: !L().fx.on }) });
     selects.push(() => { const on = L().fx.on; bypass.textContent = on ? 'Bypass FX' : 'FX bypassed'; bypass.classList.toggle('on', !on); });
-    const reset = h('button', { type: 'button', text: 'Reset FX', onclick: () => patch({ speed: 1, fx: { ...FX.DEFAULTS, on: L().fx.on } }) });
+    const reset = h('button', { type: 'button', text: 'Reset FX', onclick: () => patch({ speed: 1, fx: { ...FX.DEFAULTS, on: L().fx.on }, glitch: Glitch.fresh() }) });
+    // Glitch (shared/glitch.js): cada efeito tem um botão ON/OFF e a sua intensidade. Só em layers de vídeo.
+    const glSet = (k, p) => patch({ glitch: { ...L().glitch, [k]: { ...L().glitch[k], ...p } } });
+    const glRow = k => {
+      const btn = h('button', { type: 'button', class: 'tog gl-on', 'aria-label': `${Glitch.LABELS[k]} on/off`, onclick: () => glSet(k, { on: !L().glitch[k].on }) });
+      const slider = numRow(Glitch.LABELS[k], [0, 100], [0, 100], 1, () => L().glitch[k].intensity, v => glSet(k, { intensity: Math.round(v) }));
+      const row = h('div', { class: 'gl-row' }, btn, slider);
+      selects.push(() => { const on = !!L().glitch[k].on; btn.textContent = on ? 'ON' : 'OFF'; btn.classList.toggle('on', on); btn.setAttribute('aria-pressed', on); row.classList.toggle('off', !on); });
+      return row;
+    };
+    const glitchGroup = isColor(L()) ? '' : group('Glitch',
+      Glitch.KEYS.map(glRow),
+      h('p', { class: 'hint', text: 'Each effect has its own ON/OFF and intensity. Stutter repeats the last frames, jitter shakes the image, slices and RGB split come in short bursts, noise adds grain and scanlines, roll slides the picture vertically. Seen on the output only (the preview is a still frame).' }));
     const presets = seg([[0.25, '¼'], [0.5, '½'], [1, '1×'], [2, '2×'], [4, '4×']], () => L().speed, v => patch({ speed: v }));
     box.append(
       isColor(L()) ? '' : group('Playback',                  // cor sólida: não há vídeo a tocar ('' e não null: append() escreveria "null")
@@ -527,6 +539,7 @@
         fxRow('Blur', 'blur', [0, 40], 0.5),
         fxRow('Opacity', 'opacity', [0, 100], 1),
         h('div', { class: 'nf sel' }, h('span', { class: 'lb', text: 'Blend' }), blend)),
+      glitchGroup,
       h('div', { class: 'row-btns' }, bypass, reset));
   }
 

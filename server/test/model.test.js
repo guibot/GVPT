@@ -271,3 +271,27 @@ test('updateLayer troca a fonte para cor sem perder o vídeo escolhido', () => {
   c = applyOp(c, { op: 'updateLayer', id, patch: { source: 'video' } });
   assert.equal(c.layers[0].source, 'video'); assert.equal(c.layers[0].video, 'v.mp4');
 });
+
+test('glitch: defaults desligados, limites da intensidade e campos desconhecidos', () => {
+  const l0 = applyOp(base(), { op: 'addLayer' }).layers[0];
+  for (const k of ['stutter', 'jitter', 'slices', 'rgb', 'noise', 'roll']) assert.deepEqual(l0.glitch[k], { on: false, intensity: 50 });
+  const l = normalize({ layers: [{ id: 'a', glitch: { rgb: { on: true, intensity: 250 }, noise: { on: 'yes', intensity: -5 }, evil: 1 } }] }).layers[0];
+  assert.deepEqual(l.glitch.rgb, { on: true, intensity: 100 });
+  assert.deepEqual(l.glitch.noise, { on: false, intensity: 0 });
+  assert.equal('evil' in l.glitch, false);
+});
+
+test('glitch: o formato antigo (booleanos + intensidade partilhada) é convertido', () => {
+  const l = normalize({ layers: [{ id: 'a', glitch: { rgb: true, jitter: false, intensity: 80 } }] }).layers[0];
+  assert.deepEqual(l.glitch.rgb, { on: true, intensity: 80 });
+  assert.deepEqual(l.glitch.jitter, { on: false, intensity: 80 });
+});
+
+test('updateLayer aceita glitch e a cópia herda-o', () => {
+  let c = applyOp(base(), { op: 'addLayer' });
+  const id = c.layers[0].id;
+  c = applyOp(c, { op: 'updateLayer', id, patch: { glitch: { ...c.layers[0].glitch, stutter: { on: true, intensity: 80 } } } });
+  assert.deepEqual(c.layers[0].glitch.stutter, { on: true, intensity: 80 });
+  c = applyOp(c, { op: 'duplicateLayer', id });
+  assert.deepEqual(c.layers[1].glitch.stutter, { on: true, intensity: 80 });
+});

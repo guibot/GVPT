@@ -11,6 +11,7 @@
  * Os passos 3 e 4 resumem-se a uma única homografia (matrix3d) da caixa para o quadrilátero final.
  * Layers com mesh (mais de 1 x 1 células, ver shared/mesh.js) são desenhadas num <canvas> WebGL: o vídeo e a máscara são texturas.
  * Layers de cor sólida (source = 'color') têm um <div> com a cor em vez dos vídeos (que ficam sem ficheiro).
+ * Layers com glitch (shared/glitch.js) desenham o vídeo num <canvas> com o mesmo tamanho e posição; os <video> só descodificam.
  */
 (() => {
   const params = new URLSearchParams(location.search);
@@ -39,12 +40,12 @@
       else if (!L.maskFailed) return;                        // ainda a carregar a máscara
     }
     const out = [cfg.output.width, cfg.output.height];
-    const g = Geometry.apply(L.el, color ? [L.solid] : L.videos, L.cfg, box, vid, out);
+    const g = Geometry.apply(L.el, color ? [L.solid] : L.gc ? [...L.videos, L.gc] : L.videos, L.cfg, box, vid, out);
     if (g.meshed) {                                          // mesh: WebGL em vez de matrix3d + mask-image
       if (!L.mv) L.mv = Mesh.view(L.el);
       if (!L.mv) return applyGeometry(L);                    // sem WebGL: volta ao corner pin
       const c = L.cfg, vm = c.vmask ? VMask.toDataUrl(c.vmask) : null;
-      L.mv.update({ c, g, out, media: color ? solidCanvas(L) : L.video, maskKey: vm || c.mask || '', maskUrl: vm || (c.mask ? mediaUrl(c.mask) : null) });
+      L.mv.update({ c, g, out, media: color ? solidCanvas(L) : L.gc || L.video, maskKey: vm || c.mask || '', maskUrl: vm || (c.mask ? mediaUrl(c.mask) : null) });
     } else if (L.mv) { L.mv.destroy(); L.mv = null; }
   }
 
@@ -87,7 +88,7 @@
     solid.className = 'solid'; solid.hidden = true;
     el.appendChild(solid);
     stage.appendChild(el);
-    const L = { id, el, videos, solid, solidCv: null, cur: 0, mv: null, rate: 1, starting: false, cfg: null, vw: 0, vh: 0, srcName: null, maskKey: null,
+    const L = { id, el, videos, solid, solidCv: null, gc: null, gl: null, cur: 0, mv: null, rate: 1, starting: false, cfg: null, vw: 0, vh: 0, srcName: null, maskKey: null,
                 wraps: [], lastNow: 0, lastShown: 0, frames: 0, get video() { return this.videos[this.cur]; } };
 
     const standby = () => videos[L.cur ^ 1];
@@ -104,7 +105,7 @@
       L.lastShown = now;
       old.pause(); try { old.currentTime = 0; } catch {}  // prepara-o como próximo
       L.cur ^= 1; L.starting = false;
-      if (L.mv) L.mv.frame(nxt);
+      if (L.mv && !L.gc) L.mv.frame(nxt);
     };
 
     videos.forEach((v, i) => {
@@ -119,7 +120,8 @@
         if (i === L.cur) {
           L.frames++; L.lastNow = now;
           L.lastShown = now;
-          if (L.mv) L.mv.frame(v);                           // layer com mesh: copia o frame novo para a textura
+          if (L.gl && Glitch.on(L.cfg.glitch, 'stutter')) L.gl.capture(v);  // glitch: guarda o frame para o stutter
+          if (L.mv && !L.gc) L.mv.frame(v);                  // layer com mesh: copia o frame novo para a textura (com glitch é o loop do glitch)
           if (v.duration && v.duration - meta.mediaTime <= leadFor(L)) startStandby();
         } else if (L.starting && meta.mediaTime > 0) {
           swap(now);
@@ -136,6 +138,7 @@
     L.el.style.zIndex = index;                               // ordem do array = de baixo para cima
     L.rate = c.speed || 1; setRate(L);
     FX.apply(L.el, c);                                       // filtros, opacidade e modo de mistura
+    setGlitch(L, Glitch.active(c));
 
     const color = Geometry.isColor(c);
     const vidName = color ? null : c.video;                  // cor sólida: os vídeos ficam sem ficheiro (não gastam CPU)
@@ -176,6 +179,36 @@
     else { L.videos.forEach(v => { if (!v.paused) v.pause(); }); L.starting = false; }
   }
 
+  // ---------- glitch (shared/glitch.js) ----------
+  // Um só loop a ~30 fps para todas as layers com glitch; só existe enquanto houver alguma.
+  const glitched = new Set();
+  let glRaf = 0, glLast = 0;
+  function setGlitch(L, on) {
+    if (on === !!L.gc) return;
+    if (on) {
+      L.gc = document.createElement('canvas'); L.gc.className = 'glitch';
+      L.el.insertBefore(L.gc, L.solid);
+      L.gl = Glitch.renderer(L.gc);
+      glitched.add(L);
+      if (!glRaf) glRaf = requestAnimationFrame(glTick);
+    } else {
+      L.gc.remove(); L.gc = L.gl = null;
+      glitched.delete(L);
+    }
+    L.el.classList.toggle('glitched', on);
+  }
+  function glTick(ts) {
+    if (!glitched.size) { glRaf = 0; return; }
+    glRaf = requestAnimationFrame(glTick);
+    if (ts - glLast < 33 || halted) return;                   // ~30 fps chega e poupa o Pi; com o player desligado fica no último desenho
+    glLast = ts;
+    const now = performance.now();
+    for (const L of glitched) {
+      if (!L.cfg.visible) continue;
+      if (L.gl.draw(L.video, L.cfg.glitch, now) && L.mv) L.mv.frame(L.gc);
+    }
+  }
+
   // Pára/retoma todos os vídeos. Ao parar, a reserva do loop (se já tinha começado) volta ao início.
   function setHalted(on) {
     halted = !!on;
@@ -193,7 +226,7 @@
 
     const ids = new Set(cfg.layers.map(l => l.id));
     for (const [id, L] of layers) if (!ids.has(id)) {          // layers removidas
-      L.videos.forEach(v => { v.pause(); v.removeAttribute('src'); v.load(); }); if (L.mv) L.mv.destroy(); L.el.remove(); layers.delete(id);
+      L.videos.forEach(v => { v.pause(); v.removeAttribute('src'); v.load(); }); if (L.mv) L.mv.destroy(); setGlitch(L, false); L.el.remove(); layers.delete(id);
     }
     cfg.layers.forEach((c, i) => {
       let L = layers.get(c.id);

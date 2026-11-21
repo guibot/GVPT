@@ -40,7 +40,8 @@ const FX = (() => {
     const out = [];
     if (c.source !== 'color' && c.speed && c.speed !== 1) out.push(`${+c.speed.toFixed(2)}x`);
     const fx = get(c);
-    if (fx.on && dirty(fx)) out.push('FX');
+    const glitch = c.source !== 'color' && c.glitch && ['stutter', 'jitter', 'slices', 'rgb', 'noise', 'roll'].some(k => c.glitch[k] && c.glitch[k].on);
+    if (fx.on && (dirty(fx) || glitch)) out.push('FX');
     return out.join(' ');
   }
 

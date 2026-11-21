@@ -40,6 +40,9 @@ const FX_LIMITS = {
   opacity: [0, 100],                                               // %
 };
 const FX_DEFAULTS = { brightness: 100, contrast: 100, saturate: 100, hue: 0, invert: 0, grayscale: 0, sepia: 0, blur: 0, opacity: 100 };
+// Glitch por layer (canvas 2D, ver public/shared/glitch.js): cada efeito tem o seu interruptor e a sua intensidade.
+const GLITCH_KEYS = ['stutter', 'jitter', 'slices', 'rgb', 'noise', 'roll'];
+const GLITCH_INTENSITY = [0, 100];
 const BLEND_MODES = ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'color-dodge', 'color-burn', 'hard-light', 'soft-light',
   'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'];
 // Limites da máscara desenhada (mantêm cada mensagem bem abaixo do limite do WebSocket).
@@ -108,6 +111,17 @@ function normalizeFx(v) {
   return fx;
 }
 
+// { stutter: { on, intensity }, jitter: {...}, ... }. Também aceita o formato antigo (booleanos + uma intensidade partilhada).
+function normalizeGlitch(v) {
+  v = v && typeof v === 'object' ? v : {};
+  const g = {};
+  for (const k of GLITCH_KEYS) {
+    const e = v[k] && typeof v[k] === 'object' ? v[k] : { on: v[k] === true, intensity: v.intensity };
+    g[k] = { on: e.on === true, intensity: Math.round(num(e.intensity, 50, GLITCH_INTENSITY)) };   // por omissão desligado, a 50
+  }
+  return g;
+}
+
 // Mesh: grelha de cols x rows células; pts = deslocamento (px de saída) de cada ponto, linha a linha. Os cantos ficam sempre a 0 (são o corner pin).
 function normalizeMesh(v) {
   v = v && typeof v === 'object' ? v : {};
@@ -138,6 +152,7 @@ function normalizeLayer(l, output) {
     videoScale: num(l.videoScale, 1, LIMITS.videoScale),
     speed: Math.round(num(l.speed, 1, LIMITS.speed) * 100) / 100,   // velocidade de reprodução
     fx: normalizeFx(l.fx),
+    glitch: normalizeGlitch(l.glitch),               // efeitos glitch (o fx.on = false também os desliga)
     videoOffsetX: num(l.videoOffsetX, 0, LIMITS.videoOffsetX),
     videoOffsetY: num(l.videoOffsetY, 0, LIMITS.videoOffsetY),
     x: num(l.x, output.width / 2, LIMITS.x),         // centro da layer, em píxeis de saída
@@ -209,7 +224,7 @@ const findIndex = (c, id) => {
 };
 // Campos que o painel pode alterar (o id nunca muda).
 const PATCHABLE = ['name', 'visible', 'locked', 'source', 'color', 'video', 'mask', 'vmask', 'maskScale', 'maskMode', 'videoScale', 'videoOffsetX',
-  'videoOffsetY', 'x', 'y', 'scale', 'rotation', 'pins', 'speed', 'fx', 'mirrorX', 'mirrorY', 'mesh'];
+  'videoOffsetY', 'x', 'y', 'scale', 'rotation', 'pins', 'speed', 'fx', 'glitch', 'mirrorX', 'mirrorY', 'mesh'];
 
 // Aplica uma operação e devolve uma configuração nova (a original não é alterada).
 function applyOp(config, op) {
@@ -276,5 +291,5 @@ function applyOp(config, op) {
   return out;
 }
 
-module.exports = { validConvertSize, normalize, applyOp, publicConfig, verifyPin, hashPin, OpError, LIMITS, FX_LIMITS, FX_DEFAULTS, BLEND_MODES, SOURCES, RESOLUTIONS, MAX_LAYERS, SCHEMA_VERSION,
+module.exports = { validConvertSize, normalize, applyOp, publicConfig, verifyPin, hashPin, OpError, LIMITS, FX_LIMITS, FX_DEFAULTS, BLEND_MODES, SOURCES, GLITCH_KEYS, RESOLUTIONS, MAX_LAYERS, SCHEMA_VERSION,
   VMASK_MAX_SHAPES, VMASK_MAX_POINTS, VMASK_MAX_TOTAL };
