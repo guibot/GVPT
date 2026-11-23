@@ -534,7 +534,9 @@
         fxRow('Hue', 'hue', [-180, 180], 1),
         fxRow('Invert', 'invert', [0, 100], 1),
         fxRow('Grayscale', 'grayscale', [0, 100], 1),
-        fxRow('Sepia', 'sepia', [0, 100], 1)),
+        fxRow('Sepia', 'sepia', [0, 100], 1),
+        h('div', { class: 'row-btns' }, h('button', { type: 'button', text: 'Reset color', title: 'Put brightness, contrast, saturation, hue, invert, grayscale and sepia back to normal',
+          onclick: () => { const D = FX.DEFAULTS, c = {}; for (const k of ['brightness', 'contrast', 'saturate', 'hue', 'invert', 'grayscale', 'sepia']) c[k] = D[k]; fxPatch(c); } }))),
       group('Blur & mix',
         fxRow('Blur', 'blur', [0, 40], 0.5),
         fxRow('Opacity', 'opacity', [0, 100], 1),
@@ -1118,6 +1120,23 @@
   }
   dbtn.addEventListener('click', () => setDebug(!debugOn));
   setDebug(debugOn);
+
+  // ---------- output: o player real dentro da pré-visualização ----------
+  let outOn = false, outFrame = null;
+  try { outOn = localStorage.getItem('output') === '1'; } catch {}
+  const obtn = $('#btn-output');
+  function setOutput(on) {
+    outOn = on;
+    try { localStorage.setItem('output', on ? '1' : '0'); } catch {}
+    obtn.classList.toggle('on', on); obtn.setAttribute('aria-pressed', on);
+    preview.classList.toggle('out-on', on);
+    if (on && !outFrame) {                 // splash quase 0: sem o ecrã do QR dentro da pré-visualização
+      outFrame = h('iframe', { id: 'outframe', src: '/player/?splash=0.001', title: 'Output', tabindex: '-1', 'aria-hidden': 'true' });
+      preview.insertBefore(outFrame, pstage);
+    } else if (!on && outFrame) { outFrame.remove(); outFrame = null; }   // desligado: o player pára e deixa de gastar CPU
+  }
+  obtn.addEventListener('click', () => setOutput(!outOn));
+  setOutput(outOn);
 
   // ---------- login ----------
   function showLogin() {
